@@ -1,0 +1,738 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>웹 모니터링 시스템</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            background-color: #0f172a;
+            color: #e2e8f0;
+        }
+        .tab-button {
+            transition: all 0.3s;
+        }
+        .tab-button.active {
+            background-color: #3b82f6;
+            color: white;
+        }
+        .notification {
+            animation: slideIn 0.3s ease-out;
+        }
+        @keyframes slideIn {
+            from {
+                transform: translateY(-20px);
+                opacity: 0;
+            }
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
+        }
+    </style>
+</head>
+<body class="min-h-screen">
+    <!-- 헤더 -->
+    <header class="bg-slate-800 shadow-lg">
+        <div class="container mx-auto px-4 py-6">
+            <div class="flex justify-between items-center">
+                <h1 class="text-3xl font-bold text-blue-400">🔍 웹 모니터링 시스템</h1>
+                <div class="flex items-center space-x-4">
+                    <div id="sseStatus" class="flex items-center space-x-2">
+                        <div class="w-3 h-3 rounded-full bg-gray-500"></div>
+                        <span class="text-sm">연결 대기중</span>
+                    </div>
+                    <button onclick="connectSSE()" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg text-sm">
+                        SSE 재연결
+                    </button>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- 탭 메뉴 -->
+    <div class="container mx-auto px-4 mt-6">
+        <div class="flex space-x-2 border-b border-slate-700">
+            <button onclick="switchTab('sites')" id="tab-sites" class="tab-button px-6 py-3 rounded-t-lg active">
+                사이트 관리
+            </button>
+            <button onclick="switchTab('keywords')" id="tab-keywords" class="tab-button px-6 py-3 rounded-t-lg">
+                키워드 관리
+            </button>
+            <button onclick="switchTab('alerts')" id="tab-alerts" class="tab-button px-6 py-3 rounded-t-lg">
+                알림 목록
+            </button>
+            <button onclick="switchTab('settings')" id="tab-settings" class="tab-button px-6 py-3 rounded-t-lg">
+                설정
+            </button>
+        </div>
+    </div>
+
+    <!-- 메인 컨텐츠 -->
+    <div class="container mx-auto px-4 py-6">
+        <!-- 사이트 관리 탭 -->
+        <div id="content-sites" class="tab-content">
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <!-- 사이트 등록 폼 -->
+                <div class="lg:col-span-1">
+                    <div class="bg-slate-800 rounded-lg shadow-lg p-6">
+                        <h2 class="text-xl font-bold mb-4 text-blue-400">사이트 등록</h2>
+                        <form id="siteForm" onsubmit="createSite(event)">
+                            <div class="mb-4">
+                                <label class="block text-sm font-medium mb-2">사이트 이름</label>
+                                <input type="text" id="siteName" required
+                                    class="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                            </div>
+                            <div class="mb-4">
+                                <label class="block text-sm font-medium mb-2">URL</label>
+                                <input type="url" id="siteUrl" required
+                                    class="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                            </div>
+                            <div class="mb-4">
+                                <label class="block text-sm font-medium mb-2">체크 주기 (분)</label>
+                                <input type="number" id="siteCheckInterval" value="1" min="1" required
+                                    class="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                            </div>
+                            <div class="mb-4">
+                                <label class="flex items-center space-x-2 cursor-pointer">
+                                    <input type="checkbox" id="siteDetectContentChange"
+                                        class="w-4 h-4 text-blue-600 bg-slate-700 border-slate-600 rounded focus:ring-2 focus:ring-blue-500">
+                                    <span class="text-sm font-medium">전체 페이지 변경 감지</span>
+                                </label>
+                                <p class="text-xs text-slate-400 mt-1 ml-6">키워드 없이 페이지 내용 변경 시 알림</p>
+                            </div>
+                            <button type="submit"
+                                class="w-full bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-lg font-medium transition">
+                                등록하기
+                            </button>
+                        </form>
+                    </div>
+                </div>
+
+                <!-- 사이트 목록 -->
+                <div class="lg:col-span-2">
+                    <div class="bg-slate-800 rounded-lg shadow-lg p-6">
+                        <div class="flex justify-between items-center mb-4">
+                            <h2 class="text-xl font-bold text-blue-400">등록된 사이트</h2>
+                            <button onclick="loadSites()" class="px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg text-sm">
+                                새로고침
+                            </button>
+                        </div>
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-sm">
+                                <thead class="border-b border-slate-700">
+                                    <tr>
+                                        <th class="text-left py-3 px-4">이름</th>
+                                        <th class="text-left py-3 px-4">URL</th>
+                                        <th class="text-center py-3 px-4">주기(분)</th>
+                                        <th class="text-center py-3 px-4">키워드</th>
+                                        <th class="text-center py-3 px-4">상태</th>
+                                        <th class="text-center py-3 px-4">작업</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="sitesTable">
+                                    <tr>
+                                        <td colspan="6" class="text-center py-8 text-gray-500">
+                                            사이트를 불러오는 중...
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 키워드 관리 탭 -->
+        <div id="content-keywords" class="tab-content hidden">
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <!-- 키워드 등록 폼 -->
+                <div class="lg:col-span-1">
+                    <div class="bg-slate-800 rounded-lg shadow-lg p-6">
+                        <h2 class="text-xl font-bold mb-4 text-blue-400">키워드 등록</h2>
+                        <form id="keywordForm" onsubmit="createKeyword(event)">
+                            <div class="mb-4">
+                                <label class="block text-sm font-medium mb-2">사이트 선택</label>
+                                <select id="keywordSiteId" required
+                                    class="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                                    <option value="">사이트를 선택하세요</option>
+                                </select>
+                            </div>
+                            <div class="mb-4">
+                                <label class="block text-sm font-medium mb-2">키워드</label>
+                                <input type="text" id="keywordText" required
+                                    class="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                            </div>
+                            <button type="submit"
+                                class="w-full bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-lg font-medium transition">
+                                등록하기
+                            </button>
+                        </form>
+                    </div>
+                </div>
+
+                <!-- 키워드 목록 -->
+                <div class="lg:col-span-2">
+                    <div class="bg-slate-800 rounded-lg shadow-lg p-6">
+                        <div class="flex justify-between items-center mb-4">
+                            <h2 class="text-xl font-bold text-blue-400">등록된 키워드</h2>
+                            <button onclick="loadKeywords()" class="px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg text-sm">
+                                새로고침
+                            </button>
+                        </div>
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-sm">
+                                <thead class="border-b border-slate-700">
+                                    <tr>
+                                        <th class="text-left py-3 px-4">키워드</th>
+                                        <th class="text-left py-3 px-4">사이트</th>
+                                        <th class="text-center py-3 px-4">상태</th>
+                                        <th class="text-center py-3 px-4">등록일</th>
+                                        <th class="text-center py-3 px-4">작업</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="keywordsTable">
+                                    <tr>
+                                        <td colspan="5" class="text-center py-8 text-gray-500">
+                                            키워드를 불러오는 중...
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 알림 목록 탭 -->
+        <div id="content-alerts" class="tab-content hidden">
+            <div class="bg-slate-800 rounded-lg shadow-lg p-6">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-xl font-bold text-blue-400">알림 목록</h2>
+                    <div class="space-x-2">
+                        <button onclick="loadAlerts()" class="px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg text-sm">
+                            새로고침
+                        </button>
+                        <button onclick="deleteReadAlerts()" class="px-4 py-2 bg-red-600 hover:bg-red-700 rounded-lg text-sm">
+                            읽은 알림 삭제
+                        </button>
+                    </div>
+                </div>
+                <div id="alertsList" class="space-y-3">
+                    <div class="text-center py-8 text-gray-500">
+                        알림을 불러오는 중...
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 설정 탭 -->
+        <div id="content-settings" class="tab-content hidden">
+            <div class="max-w-2xl mx-auto">
+                <div class="bg-slate-800 rounded-lg shadow-lg p-6">
+                    <h2 class="text-xl font-bold mb-6 text-blue-400">시스템 설정</h2>
+                    <form id="settingsForm" onsubmit="saveSettings(event)">
+                        <div class="mb-6">
+                            <label class="block text-sm font-medium mb-2">디스코드 웹훅 URL</label>
+                            <input type="url" id="discordWebhookUrl"
+                                class="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                placeholder="https://discord.com/api/webhooks/...">
+                            <p class="text-xs text-gray-400 mt-1">디스코드 서버 설정에서 웹훅 URL을 생성하여 입력하세요.</p>
+                        </div>
+                        <div class="mb-6">
+                            <label class="block text-sm font-medium mb-2">알림 제목</label>
+                            <input type="text" id="notificationTitle"
+                                class="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                placeholder="웹 모니터링 알림">
+                        </div>
+                        <div class="mb-6">
+                            <label class="flex items-center space-x-3">
+                                <input type="checkbox" id="settingsEnabled"
+                                    class="w-5 h-5 bg-slate-700 border-slate-600 rounded focus:ring-2 focus:ring-blue-500">
+                                <span class="text-sm font-medium">알림 활성화</span>
+                            </label>
+                        </div>
+                        <button type="submit"
+                            class="w-full bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-lg font-medium transition">
+                            설정 저장
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 토스트 알림 컨테이너 -->
+    <div id="toastContainer" class="fixed top-4 right-4 space-y-2 z-50"></div>
+
+    <script>
+        let eventSource = null;
+        let sites = [];
+        let keywords = [];
+
+        // 페이지 로드 시 초기화
+        document.addEventListener('DOMContentLoaded', function() {
+            loadSites();
+            loadKeywords();
+            loadAlerts();
+            loadSettings();
+            connectSSE();
+        });
+
+        // SSE 연결
+        function connectSSE() {
+            if (eventSource) {
+                eventSource.close();
+            }
+
+            eventSource = new EventSource('/api/sse/subscribe');
+
+            eventSource.addEventListener('connected', function(event) {
+                updateSSEStatus(true);
+                showToast('SSE 연결 성공', 'success');
+            });
+
+            eventSource.addEventListener('alert', function(event) {
+                const alert = JSON.parse(event.data);
+                showToast(`🔔 ${alert.message}`, 'info');
+                loadAlerts(); // 알림 목록 새로고침
+            });
+
+            eventSource.onerror = function(error) {
+                updateSSEStatus(false);
+                console.error('SSE 오류:', error);
+            };
+        }
+
+        // SSE 상태 업데이트
+        function updateSSEStatus(connected) {
+            const statusDiv = document.getElementById('sseStatus');
+            if (connected) {
+                statusDiv.innerHTML = `
+                    <div class="w-3 h-3 rounded-full bg-green-500"></div>
+                    <span class="text-sm">연결됨</span>
+                `;
+            } else {
+                statusDiv.innerHTML = `
+                    <div class="w-3 h-3 rounded-full bg-red-500"></div>
+                    <span class="text-sm">연결 끊김</span>
+                `;
+            }
+        }
+
+        // 탭 전환
+        function switchTab(tabName) {
+            // 모든 탭 버튼 비활성화
+            document.querySelectorAll('.tab-button').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            // 선택한 탭 버튼 활성화
+            document.getElementById('tab-' + tabName).classList.add('active');
+
+            // 모든 탭 컨텐츠 숨기기
+            document.querySelectorAll('.tab-content').forEach(content => {
+                content.classList.add('hidden');
+            });
+            // 선택한 탭 컨텐츠 표시
+            document.getElementById('content-' + tabName).classList.remove('hidden');
+        }
+
+        // 사이트 목록 불러오기
+        async function loadSites() {
+            try {
+                const response = await fetch('/api/sites');
+                sites = await response.json();
+
+                const tbody = document.getElementById('sitesTable');
+                if (sites.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="6" class="text-center py-8 text-gray-500">등록된 사이트가 없습니다.</td></tr>';
+                    return;
+                }
+
+                tbody.innerHTML = sites.map(site => `
+                    <tr class="border-b border-slate-700 hover:bg-slate-700">
+                        <td class="py-3 px-4 font-medium">
+                            ${site.name}
+                            ${site.detectContentChange ? '<span class="ml-2 px-2 py-1 bg-purple-900 text-purple-300 rounded text-xs" title="전체 페이지 변경 감지">🔍</span>' : ''}
+                        </td>
+                        <td class="py-3 px-4 text-sm text-gray-400">${site.url}</td>
+                        <td class="py-3 px-4 text-center">${site.checkInterval}</td>
+                        <td class="py-3 px-4 text-center">
+                            <span class="px-2 py-1 bg-blue-900 text-blue-300 rounded text-xs">${site.keywordCount || 0}</span>
+                        </td>
+                        <td class="py-3 px-4 text-center">
+                            <button onclick="toggleSite(${site.id})" class="px-3 py-1 rounded text-xs ${site.active ? 'bg-green-900 text-green-300' : 'bg-gray-700 text-gray-400'}">
+                                ${site.active ? '활성' : '비활성'}
+                            </button>
+                        </td>
+                        <td class="py-3 px-4 text-center">
+                            <button onclick="deleteSite(${site.id})" class="px-3 py-1 bg-red-900 text-red-300 rounded text-xs hover:bg-red-800">
+                                삭제
+                            </button>
+                        </td>
+                    </tr>
+                `).join('');
+
+                // 키워드 폼의 사이트 선택 드롭다운 업데이트
+                const siteSelect = document.getElementById('keywordSiteId');
+                siteSelect.innerHTML = '<option value="">사이트를 선택하세요</option>' +
+                    sites.map(site => `<option value="${site.id}">${site.name}</option>`).join('');
+            } catch (error) {
+                console.error('사이트 목록 로드 실패:', error);
+                showToast('사이트 목록 로드 실패', 'error');
+            }
+        }
+
+        // 사이트 등록
+        async function createSite(event) {
+            event.preventDefault();
+
+            const site = {
+                name: document.getElementById('siteName').value,
+                url: document.getElementById('siteUrl').value,
+                checkInterval: parseInt(document.getElementById('siteCheckInterval').value),
+                active: true,
+                detectContentChange: document.getElementById('siteDetectContentChange').checked
+            };
+
+            try {
+                const response = await fetch('/api/sites', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(site)
+                });
+
+                if (response.ok) {
+                    showToast('사이트가 등록되었습니다.', 'success');
+                    document.getElementById('siteForm').reset();
+                    loadSites();
+                } else {
+                    showToast('사이트 등록 실패', 'error');
+                }
+            } catch (error) {
+                console.error('사이트 등록 실패:', error);
+                showToast('사이트 등록 실패', 'error');
+            }
+        }
+
+        // 사이트 활성화/비활성화 토글
+        async function toggleSite(id) {
+            try {
+                const response = await fetch(`/api/sites/${id}/toggle`, {
+                    method: 'PATCH'
+                });
+
+                if (response.ok) {
+                    showToast('사이트 상태가 변경되었습니다.', 'success');
+                    loadSites();
+                } else {
+                    showToast('상태 변경 실패', 'error');
+                }
+            } catch (error) {
+                console.error('상태 변경 실패:', error);
+                showToast('상태 변경 실패', 'error');
+            }
+        }
+
+        // 사이트 삭제
+        async function deleteSite(id) {
+            if (!confirm('정말 이 사이트를 삭제하시겠습니까?')) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/sites/${id}`, {
+                    method: 'DELETE'
+                });
+
+                if (response.ok) {
+                    showToast('사이트가 삭제되었습니다.', 'success');
+                    loadSites();
+                } else {
+                    showToast('사이트 삭제 실패', 'error');
+                }
+            } catch (error) {
+                console.error('사이트 삭제 실패:', error);
+                showToast('사이트 삭제 실패', 'error');
+            }
+        }
+
+        // 키워드 목록 불러오기
+        async function loadKeywords() {
+            try {
+                const response = await fetch('/api/keywords');
+                keywords = await response.json();
+
+                const tbody = document.getElementById('keywordsTable');
+                if (keywords.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="5" class="text-center py-8 text-gray-500">등록된 키워드가 없습니다.</td></tr>';
+                    return;
+                }
+
+                tbody.innerHTML = keywords.map(keyword => `
+                    <tr class="border-b border-slate-700 hover:bg-slate-700">
+                        <td class="py-3 px-4 font-medium">${keyword.keyword}</td>
+                        <td class="py-3 px-4 text-sm text-gray-400">${keyword.site?.name || 'N/A'}</td>
+                        <td class="py-3 px-4 text-center">
+                            <span class="px-2 py-1 rounded text-xs ${keyword.active ? 'bg-green-900 text-green-300' : 'bg-gray-700 text-gray-400'}">
+                                ${keyword.active ? '활성' : '비활성'}
+                            </span>
+                        </td>
+                        <td class="py-3 px-4 text-center text-sm text-gray-400">${new Date(keyword.createdAt).toLocaleDateString()}</td>
+                        <td class="py-3 px-4 text-center">
+                            <button onclick="deleteKeyword(${keyword.id})" class="px-3 py-1 bg-red-900 text-red-300 rounded text-xs hover:bg-red-800">
+                                삭제
+                            </button>
+                        </td>
+                    </tr>
+                `).join('');
+            } catch (error) {
+                console.error('키워드 목록 로드 실패:', error);
+                showToast('키워드 목록 로드 실패', 'error');
+            }
+        }
+
+        // 키워드 등록
+        async function createKeyword(event) {
+            event.preventDefault();
+
+            const keyword = {
+                keyword: document.getElementById('keywordText').value,
+                site: { id: parseInt(document.getElementById('keywordSiteId').value) },
+                active: true
+            };
+
+            try {
+                const response = await fetch('/api/keywords', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(keyword)
+                });
+
+                if (response.ok) {
+                    showToast('키워드가 등록되었습니다.', 'success');
+                    document.getElementById('keywordForm').reset();
+                    loadKeywords();
+                    loadSites(); // 사이트 목록도 새로고침 (키워드 개수 업데이트)
+                } else {
+                    showToast('키워드 등록 실패', 'error');
+                }
+            } catch (error) {
+                console.error('키워드 등록 실패:', error);
+                showToast('키워드 등록 실패', 'error');
+            }
+        }
+
+        // 키워드 삭제
+        async function deleteKeyword(id) {
+            if (!confirm('정말 이 키워드를 삭제하시겠습니까?')) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/keywords/${id}`, {
+                    method: 'DELETE'
+                });
+
+                if (response.ok) {
+                    showToast('키워드가 삭제되었습니다.', 'success');
+                    loadKeywords();
+                    loadSites();
+                } else {
+                    showToast('키워드 삭제 실패', 'error');
+                }
+            } catch (error) {
+                console.error('키워드 삭제 실패:', error);
+                showToast('키워드 삭제 실패', 'error');
+            }
+        }
+
+        // 알림 목록 불러오기
+        async function loadAlerts() {
+            try {
+                const response = await fetch('/api/alerts');
+                const alerts = await response.json();
+
+                const alertsList = document.getElementById('alertsList');
+                if (alerts.length === 0) {
+                    alertsList.innerHTML = '<div class="text-center py-8 text-gray-500">알림이 없습니다.</div>';
+                    return;
+                }
+
+                alertsList.innerHTML = alerts.map(alert => `
+                    <div class="bg-slate-700 rounded-lg p-4 ${!alert.sent ? 'border-l-4 border-blue-500' : ''}">
+                        <div class="flex justify-between items-start">
+                            <div class="flex-1">
+                                <div class="flex items-center space-x-2 mb-2">
+                                    <span class="px-2 py-1 bg-blue-900 text-blue-300 rounded text-xs">${alert.siteName}</span>
+                                    ${alert.keywordText ? `<span class="px-2 py-1 bg-purple-900 text-purple-300 rounded text-xs">${alert.keywordText}</span>` : '<span class="px-2 py-1 bg-purple-900 text-purple-300 rounded text-xs">페이지 변경</span>'}
+                                    ${!alert.sent ? '<span class="px-2 py-1 bg-red-900 text-red-300 rounded text-xs">새 알림</span>' : ''}
+                                </div>
+                                <p class="text-sm mb-2">${alert.message}</p>
+                                <a href="${alert.detectedUrl}" target="_blank" class="text-xs text-blue-400 hover:underline">
+                                    ${alert.detectedUrl}
+                                </a>
+                                <p class="text-xs text-gray-400 mt-2">
+                                    ${new Date(alert.detectedAt).toLocaleString()}
+                                </p>
+                            </div>
+                            <div class="flex flex-col space-y-2 ml-4">
+                                ${!alert.sent ? `<button onclick="markAlertAsRead(${alert.id})" class="px-3 py-1 bg-green-900 text-green-300 rounded text-xs hover:bg-green-800">읽음</button>` : ''}
+                                <button onclick="deleteAlert(${alert.id})" class="px-3 py-1 bg-red-900 text-red-300 rounded text-xs hover:bg-red-800">삭제</button>
+                            </div>
+                        </div>
+                    </div>
+                `).join('');
+            } catch (error) {
+                console.error('알림 목록 로드 실패:', error);
+                showToast('알림 목록 로드 실패', 'error');
+            }
+        }
+
+        // 알림 읽음 처리
+        async function markAlertAsRead(id) {
+            try {
+                const response = await fetch(`/api/alerts/${id}/mark-sent`, {
+                    method: 'PATCH'
+                });
+
+                if (response.ok) {
+                    loadAlerts();
+                } else {
+                    showToast('알림 읽음 처리 실패', 'error');
+                }
+            } catch (error) {
+                console.error('알림 읽음 처리 실패:', error);
+                showToast('알림 읽음 처리 실패', 'error');
+            }
+        }
+
+        // 알림 삭제
+        async function deleteAlert(id) {
+            try {
+                const response = await fetch(`/api/alerts/${id}`, {
+                    method: 'DELETE'
+                });
+
+                if (response.ok) {
+                    showToast('알림이 삭제되었습니다.', 'success');
+                    loadAlerts();
+                } else {
+                    showToast('알림 삭제 실패', 'error');
+                }
+            } catch (error) {
+                console.error('알림 삭제 실패:', error);
+                showToast('알림 삭제 실패', 'error');
+            }
+        }
+
+        // 읽은 알림 전체 삭제
+        async function deleteReadAlerts() {
+            if (!confirm('읽은 알림을 모두 삭제하시겠습니까?')) {
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/alerts/sent', {
+                    method: 'DELETE'
+                });
+
+                if (response.ok) {
+                    const text = await response.text();
+                    showToast(text, 'success');
+                    loadAlerts();
+                } else {
+                    showToast('알림 삭제 실패', 'error');
+                }
+            } catch (error) {
+                console.error('알림 삭제 실패:', error);
+                showToast('알림 삭제 실패', 'error');
+            }
+        }
+
+        // 설정 불러오기
+        async function loadSettings() {
+            try {
+                const response = await fetch('/api/settings');
+                const settings = await response.json();
+
+                if (settings.length > 0) {
+                    const setting = settings[0];
+                    document.getElementById('discordWebhookUrl').value = setting.discordWebhookUrl || '';
+                    document.getElementById('notificationTitle').value = setting.notificationTitle || '';
+                    document.getElementById('settingsEnabled').checked = setting.enabled;
+                }
+            } catch (error) {
+                console.error('설정 로드 실패:', error);
+            }
+        }
+
+        // 설정 저장
+        async function saveSettings(event) {
+            event.preventDefault();
+
+            const setting = {
+                discordWebhookUrl: document.getElementById('discordWebhookUrl').value,
+                notificationTitle: document.getElementById('notificationTitle').value,
+                enabled: document.getElementById('settingsEnabled').checked
+            };
+
+            try {
+                // 기존 설정이 있는지 확인
+                const getResponse = await fetch('/api/settings');
+                const settings = await getResponse.json();
+
+                let response;
+                if (settings.length > 0) {
+                    // 수정
+                    response = await fetch(`/api/settings/${settings[0].id}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(setting)
+                    });
+                } else {
+                    // 생성
+                    response = await fetch('/api/settings', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(setting)
+                    });
+                }
+
+                if (response.ok) {
+                    showToast('설정이 저장되었습니다.', 'success');
+                } else {
+                    showToast('설정 저장 실패', 'error');
+                }
+            } catch (error) {
+                console.error('설정 저장 실패:', error);
+                showToast('설정 저장 실패', 'error');
+            }
+        }
+
+        // 토스트 알림 표시
+        function showToast(message, type = 'info') {
+            const container = document.getElementById('toastContainer');
+            const toast = document.createElement('div');
+
+            const colors = {
+                success: 'bg-green-600',
+                error: 'bg-red-600',
+                info: 'bg-blue-600'
+            };
+
+            toast.className = `notification ${colors[type]} text-white px-6 py-3 rounded-lg shadow-lg`;
+            toast.textContent = message;
+
+            container.appendChild(toast);
+
+            setTimeout(() => {
+                toast.remove();
+            }, 3000);
+        }
+    </script>
+</body>
+</html>
