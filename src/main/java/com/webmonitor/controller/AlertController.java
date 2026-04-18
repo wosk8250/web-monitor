@@ -1,6 +1,7 @@
 package com.webmonitor.controller;
 
 import com.webmonitor.domain.Alert;
+import com.webmonitor.dto.AlertResponse;
 import com.webmonitor.repository.AlertRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -11,6 +12,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.stream.Collectors;
 
 /**
  * 알림 관리 REST API 컨트롤러
@@ -29,9 +31,11 @@ public class AlertController {
      * @return 전체 알림 목록 (최신순)
      */
     @GetMapping
-    public ResponseEntity<List<Alert>> getAllAlerts() {
+    public ResponseEntity<List<AlertResponse>> getAllAlerts() {
         log.info("GET /api/alerts - 모든 알림 조회 요청");
-        List<Alert> alerts = alertRepository.findAll();
+        List<AlertResponse> alerts = alertRepository.findAll().stream()
+                .map(AlertResponse::from)
+                .collect(Collectors.toList());
         return ResponseEntity.ok(alerts);
     }
 
@@ -42,9 +46,10 @@ public class AlertController {
      * @return 조회된 알림
      */
     @GetMapping("/{id}")
-    public ResponseEntity<Alert> getAlertById(@PathVariable Long id) {
+    public ResponseEntity<AlertResponse> getAlertById(@PathVariable Long id) {
         log.info("GET /api/alerts/{} - 알림 조회 요청", id);
         return alertRepository.findById(id)
+                .map(AlertResponse::from)
                 .map(ResponseEntity::ok)
                 .orElse(ResponseEntity.notFound().build());
     }
@@ -55,9 +60,11 @@ public class AlertController {
      * @return 전송되지 않은 알림 목록
      */
     @GetMapping("/unsent")
-    public ResponseEntity<List<Alert>> getUnsentAlerts() {
+    public ResponseEntity<List<AlertResponse>> getUnsentAlerts() {
         log.info("GET /api/alerts/unsent - 미전송 알림 조회 요청");
-        List<Alert> alerts = alertRepository.findBySent(false);
+        List<AlertResponse> alerts = alertRepository.findBySent(false).stream()
+                .map(AlertResponse::from)
+                .collect(Collectors.toList());
         return ResponseEntity.ok(alerts);
     }
 
@@ -67,9 +74,11 @@ public class AlertController {
      * @return 전송된 알림 목록
      */
     @GetMapping("/sent")
-    public ResponseEntity<List<Alert>> getSentAlerts() {
+    public ResponseEntity<List<AlertResponse>> getSentAlerts() {
         log.info("GET /api/alerts/sent - 전송 완료 알림 조회 요청");
-        List<Alert> alerts = alertRepository.findBySent(true);
+        List<AlertResponse> alerts = alertRepository.findBySent(true).stream()
+                .map(AlertResponse::from)
+                .collect(Collectors.toList());
         return ResponseEntity.ok(alerts);
     }
 
@@ -80,13 +89,12 @@ public class AlertController {
      * @return 해당 사이트의 알림 목록
      */
     @GetMapping("/site/{siteId}")
-    public ResponseEntity<List<Alert>> getAlertsBySite(@PathVariable Long siteId) {
+    public ResponseEntity<List<AlertResponse>> getAlertsBySite(@PathVariable Long siteId) {
         log.info("GET /api/alerts/site/{} - 사이트별 알림 조회 요청", siteId);
-        // Site 엔티티를 직접 조회하지 않고 Repository 메서드를 수정하거나,
-        // 여기서는 간단히 모든 알림을 조회한 후 필터링
-        List<Alert> alerts = alertRepository.findAll().stream()
+        List<AlertResponse> alerts = alertRepository.findAll().stream()
                 .filter(alert -> alert.getSite().getId().equals(siteId))
-                .toList();
+                .map(AlertResponse::from)
+                .collect(Collectors.toList());
         return ResponseEntity.ok(alerts);
     }
 
@@ -97,11 +105,12 @@ public class AlertController {
      * @return 해당 키워드의 알림 목록
      */
     @GetMapping("/keyword/{keywordId}")
-    public ResponseEntity<List<Alert>> getAlertsByKeyword(@PathVariable Long keywordId) {
+    public ResponseEntity<List<AlertResponse>> getAlertsByKeyword(@PathVariable Long keywordId) {
         log.info("GET /api/alerts/keyword/{} - 키워드별 알림 조회 요청", keywordId);
-        List<Alert> alerts = alertRepository.findAll().stream()
-                .filter(alert -> alert.getKeyword().getId().equals(keywordId))
-                .toList();
+        List<AlertResponse> alerts = alertRepository.findAll().stream()
+                .filter(alert -> alert.getKeyword() != null && alert.getKeyword().getId().equals(keywordId))
+                .map(AlertResponse::from)
+                .collect(Collectors.toList());
         return ResponseEntity.ok(alerts);
     }
 
@@ -113,11 +122,13 @@ public class AlertController {
      * @return 해당 기간의 알림 목록
      */
     @GetMapping("/period")
-    public ResponseEntity<List<Alert>> getAlertsByPeriod(
+    public ResponseEntity<List<AlertResponse>> getAlertsByPeriod(
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime startDate,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime endDate) {
         log.info("GET /api/alerts/period - 기간별 알림 조회: {} ~ {}", startDate, endDate);
-        List<Alert> alerts = alertRepository.findByDetectedAtBetween(startDate, endDate);
+        List<AlertResponse> alerts = alertRepository.findByDetectedAtBetween(startDate, endDate).stream()
+                .map(AlertResponse::from)
+                .collect(Collectors.toList());
         return ResponseEntity.ok(alerts);
     }
 
@@ -128,7 +139,7 @@ public class AlertController {
      * @return 업데이트된 알림 정보
      */
     @PatchMapping("/{id}/mark-sent")
-    public ResponseEntity<Alert> markAlertAsSent(@PathVariable Long id) {
+    public ResponseEntity<AlertResponse> markAlertAsSent(@PathVariable Long id) {
         log.info("PATCH /api/alerts/{}/mark-sent - 알림 읽음 처리 요청", id);
 
         return alertRepository.findById(id)
@@ -137,7 +148,7 @@ public class AlertController {
                     alert.setSentAt(LocalDateTime.now());
                     Alert updatedAlert = alertRepository.save(alert);
                     log.info("알림 읽음 처리 완료: ID = {}", id);
-                    return ResponseEntity.ok(updatedAlert);
+                    return ResponseEntity.ok(AlertResponse.from(updatedAlert));
                 })
                 .orElseGet(() -> {
                     log.error("알림을 찾을 수 없습니다: ID = {}", id);
