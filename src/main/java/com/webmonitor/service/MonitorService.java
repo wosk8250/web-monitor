@@ -70,6 +70,9 @@ public class MonitorService {
             // JSoup을 사용하여 웹페이지 크롤링
             Document document = crawlWebsite(site.getUrl());
 
+            // 페이지 제목 추출
+            String pageTitle = document.title();
+
             // 불필요한 태그 제거 (스크립트, 스타일, 네비게이션 요소 등)
             document.select("script, style, header, footer, nav, aside").remove();
 
@@ -85,12 +88,12 @@ public class MonitorService {
 
                 // 전체 페이지 변경 감지 옵션이 활성화된 경우 알림 생성
                 if (site.getDetectContentChange()) {
-                    createContentChangeAlert(site, document.location());
+                    createContentChangeAlert(site, pageTitle, document.location());
                 }
             }
 
             // 키워드 감지
-            detectKeywords(site, pageText, document.location());
+            detectKeywords(site, pageText, pageTitle, document.location());
 
         } catch (IOException e) {
             log.error("사이트 크롤링 실패: {} - {}", site.getName(), e.getMessage());
@@ -177,10 +180,11 @@ public class MonitorService {
      * 페이지에서 키워드 감지
      * @param site 사이트 정보
      * @param pageText 페이지 전체 텍스트
+     * @param pageTitle 페이지 제목
      * @param detectedUrl 감지된 URL
      */
     @Transactional
-    public void detectKeywords(Site site, String pageText, String detectedUrl) {
+    public void detectKeywords(Site site, String pageText, String pageTitle, String detectedUrl) {
         // 해당 사이트의 활성화된 키워드 조회
         List<Keyword> keywords = keywordRepository.findBySiteAndActive(site, true);
 
@@ -195,7 +199,7 @@ public class MonitorService {
         for (Keyword keyword : keywords) {
             if (pageText.contains(keyword.getKeyword())) {
                 log.info("키워드 감지! 사이트: {}, 키워드: {}", site.getName(), keyword.getKeyword());
-                createAlert(site, keyword, pageText, detectedUrl);
+                createAlert(site, keyword, pageTitle, detectedUrl);
             }
         }
     }
@@ -204,11 +208,11 @@ public class MonitorService {
      * 알림 생성 및 실시간 전송
      * @param site 사이트 정보
      * @param keyword 감지된 키워드
-     * @param pageText 페이지 텍스트
+     * @param pageTitle 페이지 제목
      * @param detectedUrl 감지된 URL
      */
     @Transactional
-    public void createAlert(Site site, Keyword keyword, String pageText, String detectedUrl) {
+    public void createAlert(Site site, Keyword keyword, String pageTitle, String detectedUrl) {
         // 알림 메시지 생성
         String message = String.format(
                 "[%s] 사이트에서 키워드 '%s'가 감지되었습니다.",
@@ -221,6 +225,7 @@ public class MonitorService {
                 .site(site)
                 .keyword(keyword)
                 .message(message)
+                .pageTitle(pageTitle)
                 .detectedUrl(detectedUrl)
                 .sent(false) // 아직 전송되지 않음
                 .build();
@@ -242,10 +247,11 @@ public class MonitorService {
     /**
      * 전체 페이지 변경 감지 알림 생성 및 실시간 전송
      * @param site 사이트 정보
+     * @param pageTitle 페이지 제목
      * @param detectedUrl 감지된 URL
      */
     @Transactional
-    public void createContentChangeAlert(Site site, String detectedUrl) {
+    public void createContentChangeAlert(Site site, String pageTitle, String detectedUrl) {
         // 알림 메시지 생성
         String message = String.format(
                 "[%s] 사이트의 내용이 변경되었습니다.",
@@ -257,6 +263,7 @@ public class MonitorService {
                 .site(site)
                 .keyword(null) // 전체 페이지 변경 감지는 키워드 없음
                 .message(message)
+                .pageTitle(pageTitle)
                 .detectedUrl(detectedUrl)
                 .sent(false) // 아직 전송되지 않음
                 .build();

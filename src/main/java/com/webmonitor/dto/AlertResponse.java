@@ -54,6 +54,11 @@ public class AlertResponse {
     private String message;
 
     /**
+     * 페이지 제목
+     */
+    private String pageTitle;
+
+    /**
      * 키워드가 감지된 URL
      */
     private String detectedUrl;
@@ -87,6 +92,7 @@ public class AlertResponse {
                 .keywordId(alert.getKeyword() != null ? alert.getKeyword().getId() : null)
                 .keywordText(alert.getKeyword() != null ? alert.getKeyword().getKeyword() : null)
                 .message(alert.getMessage())
+                .pageTitle(alert.getPageTitle())
                 .detectedUrl(alert.getDetectedUrl())
                 .detectedAt(alert.getDetectedAt())
                 .sent(alert.getSent())

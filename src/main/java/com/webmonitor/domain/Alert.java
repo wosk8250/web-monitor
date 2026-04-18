@@ -33,6 +33,9 @@ public class Alert {
     @Column(nullable = false, columnDefinition = "TEXT") // null 불가, TEXT 타입으로 지정 (긴 텍스트 저장 가능)
     private String message; // 알림 메시지 내용
 
+    @Column(length = 500) // 최대 길이 500자
+    private String pageTitle; // 페이지 제목
+
     @Column(nullable = false, length = 500) // null 불가, 최대 길이 500자
     private String detectedUrl; // 키워드가 감지된 URL
 
