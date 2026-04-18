@@ -70,7 +70,10 @@ public class MonitorService {
             // JSoup을 사용하여 웹페이지 크롤링
             Document document = crawlWebsite(site.getUrl());
 
-            // 페이지 전체 텍스트 추출
+            // 불필요한 태그 제거 (스크립트, 스타일, 네비게이션 요소 등)
+            document.select("script, style, header, footer, nav, aside").remove();
+
+            // 본문 내용만 텍스트 추출
             String pageText = document.body().text();
 
             // 해시값 계산 및 변경 감지
