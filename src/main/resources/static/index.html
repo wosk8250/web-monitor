@@ -571,15 +571,9 @@
                                     ${alert.keywordText ? `<span class="px-2 py-1 bg-purple-900 text-purple-300 rounded text-xs">${alert.keywordText}</span>` : '<span class="px-2 py-1 bg-purple-900 text-purple-300 rounded text-xs">페이지 변경</span>'}
                                     ${!alert.sent ? '<span class="px-2 py-1 bg-red-900 text-red-300 rounded text-xs">새 알림</span>' : ''}
                                 </div>
-                                ${alert.pageTitle ? `<h3 class="text-base font-semibold mb-2 text-white">${alert.pageTitle}</h3>` : ''}
+                                ${alert.pageTitle ? `<a href="${alert.detectedUrl}" target="_blank" class="block text-base font-semibold mb-2 text-blue-400 hover:text-blue-300 hover:underline">${alert.pageTitle}</a>` : `<a href="${alert.detectedUrl}" target="_blank" class="block text-base font-semibold mb-2 text-blue-400 hover:text-blue-300 hover:underline">제목 없음</a>`}
                                 <p class="text-sm mb-2">${alert.message}</p>
-                                <a href="${alert.detectedUrl}" target="_blank" class="inline-flex items-center text-xs text-blue-400 hover:text-blue-300 hover:underline">
-                                    <svg class="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path>
-                                    </svg>
-                                    페이지 보기
-                                </a>
-                                <p class="text-xs text-gray-400 mt-2">
+                                <p class="text-xs text-gray-400">
                                     ${new Date(alert.detectedAt).toLocaleString()}
                                 </p>
                             </div>
