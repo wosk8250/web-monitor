@@ -186,19 +186,31 @@ public class MonitorService {
     @Transactional
     public void detectKeywords(Site site, String pageText, String pageTitle, String detectedUrl) {
         // 해당 사이트의 활성화된 키워드 조회
-        List<Keyword> keywords = keywordRepository.findBySiteAndActive(site, true);
+        List<Keyword> siteKeywords = keywordRepository.findBySiteAndActive(site, true);
 
-        if (keywords.isEmpty()) {
+        // 전체 공통 키워드 조회 (site가 null이고 active인 키워드)
+        List<Keyword> globalKeywords = keywordRepository.findByActive(true).stream()
+                .filter(keyword -> keyword.getSite() == null)
+                .toList();
+
+        // 사이트별 키워드와 전체 공통 키워드 합치기
+        List<Keyword> allKeywords = new java.util.ArrayList<>(siteKeywords);
+        allKeywords.addAll(globalKeywords);
+
+        if (allKeywords.isEmpty()) {
             log.debug("사이트에 등록된 활성 키워드가 없습니다: {}", site.getName());
             return;
         }
 
-        log.debug("키워드 감지 시작: {} (키워드 수: {})", site.getName(), keywords.size());
+        log.debug("키워드 감지 시작: {} (사이트 키워드: {}, 공통 키워드: {})",
+                site.getName(), siteKeywords.size(), globalKeywords.size());
 
         // 각 키워드에 대해 검사
-        for (Keyword keyword : keywords) {
+        for (Keyword keyword : allKeywords) {
             if (pageText.contains(keyword.getKeyword())) {
-                log.info("키워드 감지! 사이트: {}, 키워드: {}", site.getName(), keyword.getKeyword());
+                String keywordType = keyword.getSite() == null ? "공통" : "사이트";
+                log.info("키워드 감지! 사이트: {}, 키워드: {} ({})",
+                        site.getName(), keyword.getKeyword(), keywordType);
                 createAlert(site, keyword, pageTitle, detectedUrl);
             }
         }

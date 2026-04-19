@@ -69,7 +69,21 @@ public class KeywordController {
     public ResponseEntity<List<Keyword>> getKeywordsBySite(@PathVariable Long siteId) {
         log.info("GET /api/keywords/site/{} - 사이트별 키워드 조회 요청", siteId);
         List<Keyword> keywords = keywordRepository.findAll().stream()
-                .filter(keyword -> keyword.getSite().getId().equals(siteId))
+                .filter(keyword -> keyword.getSite() != null && keyword.getSite().getId().equals(siteId))
+                .toList();
+        return ResponseEntity.ok(keywords);
+    }
+
+    /**
+     * 전체 공통 키워드 조회 (사이트가 지정되지 않은 키워드)
+     * GET /api/keywords/global
+     * @return 전체 공통 키워드 목록
+     */
+    @GetMapping("/global")
+    public ResponseEntity<List<Keyword>> getGlobalKeywords() {
+        log.info("GET /api/keywords/global - 전체 공통 키워드 조회 요청");
+        List<Keyword> keywords = keywordRepository.findAll().stream()
+                .filter(keyword -> keyword.getSite() == null)
                 .toList();
         return ResponseEntity.ok(keywords);
     }

@@ -27,9 +27,9 @@ public class Keyword {
     private String keyword; // 감시할 키워드
 
     @ManyToOne(fetch = FetchType.LAZY) // 다대일 관계, 지연 로딩 (필요할 때만 Site 정보를 조회)
-    @JoinColumn(name = "site_id", nullable = false) // 외래 키 컬럼명을 'site_id'로 지정, null 불가
+    @JoinColumn(name = "site_id", nullable = true) // 외래 키 컬럼명을 'site_id'로 지정 (null 허용: 전체 공통 키워드)
     @JsonIgnore // JSON 직렬화 시 무한 순환 참조 방지
-    private Site site; // 키워드가 속한 사이트
+    private Site site; // 키워드가 속한 사이트 (null이면 전체 사이트 공통 키워드)
 
     @Column(nullable = false) // null 불가
     private Boolean active = true; // 활성화 여부 (기본값: true)
