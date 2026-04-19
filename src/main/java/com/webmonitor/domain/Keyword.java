@@ -1,5 +1,6 @@
 package com.webmonitor.domain;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
@@ -27,6 +28,7 @@ public class Keyword {
 
     @ManyToOne(fetch = FetchType.LAZY) // 다대일 관계, 지연 로딩 (필요할 때만 Site 정보를 조회)
     @JoinColumn(name = "site_id", nullable = false) // 외래 키 컬럼명을 'site_id'로 지정, null 불가
+    @JsonIgnore // JSON 직렬화 시 무한 순환 참조 방지
     private Site site; // 키워드가 속한 사이트
 
     @Column(nullable = false) // null 불가
