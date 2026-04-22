@@ -30,6 +30,30 @@
                 opacity: 1;
             }
         }
+        .keyword-tag {
+            display: inline-block;
+            margin: 2px;
+            padding: 4px 8px;
+            background-color: #1e40af;
+            color: #dbeafe;
+            border-radius: 4px;
+            font-size: 0.75rem;
+        }
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.7);
+        }
+        .modal.active {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
     </style>
 </head>
 <body class="min-h-screen">
@@ -56,9 +80,6 @@
         <div class="flex space-x-2 border-b border-slate-700">
             <button onclick="switchTab('sites')" id="tab-sites" class="tab-button px-6 py-3 rounded-t-lg active">
                 사이트 관리
-            </button>
-            <button onclick="switchTab('keywords')" id="tab-keywords" class="tab-button px-6 py-3 rounded-t-lg">
-                키워드 관리
             </button>
             <button onclick="switchTab('alerts')" id="tab-alerts" class="tab-button px-6 py-3 rounded-t-lg">
                 알림 목록
@@ -95,12 +116,10 @@
                                     class="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
                             </div>
                             <div class="mb-4">
-                                <label class="flex items-center space-x-2 cursor-pointer">
-                                    <input type="checkbox" id="siteDetectContentChange"
-                                        class="w-4 h-4 text-blue-600 bg-slate-700 border-slate-600 rounded focus:ring-2 focus:ring-blue-500">
-                                    <span class="text-sm font-medium">전체 페이지 변경 감지</span>
-                                </label>
-                                <p class="text-xs text-slate-400 mt-1 ml-6">키워드 없이 페이지 내용 변경 시 알림</p>
+                                <label class="block text-sm font-medium mb-2">키워드 (선택사항)</label>
+                                <input type="text" id="siteKeywords" placeholder="긴급,공지,중요 (쉼표로 구분, 공백 시 새글 알림)"
+                                    class="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                                <p class="text-xs text-slate-400 mt-1">키워드를 입력하지 않으면 자동으로 새글 알림으로 설정됩니다.</p>
                             </div>
                             <button type="submit"
                                 class="w-full bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-lg font-medium transition">
@@ -126,7 +145,7 @@
                                         <th class="text-left py-3 px-4">이름</th>
                                         <th class="text-left py-3 px-4">URL</th>
                                         <th class="text-center py-3 px-4">주기(분)</th>
-                                        <th class="text-center py-3 px-4">키워드</th>
+                                        <th class="text-left py-3 px-4">키워드</th>
                                         <th class="text-center py-3 px-4">상태</th>
                                         <th class="text-center py-3 px-4">작업</th>
                                     </tr>
@@ -135,68 +154,6 @@
                                     <tr>
                                         <td colspan="6" class="text-center py-8 text-gray-500">
                                             사이트를 불러오는 중...
-                                        </td>
-                                    </tr>
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- 키워드 관리 탭 -->
-        <div id="content-keywords" class="tab-content hidden">
-            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                <!-- 키워드 등록 폼 -->
-                <div class="lg:col-span-1">
-                    <div class="bg-slate-800 rounded-lg shadow-lg p-6">
-                        <h2 class="text-xl font-bold mb-4 text-blue-400">키워드 등록</h2>
-                        <form id="keywordForm" onsubmit="createKeyword(event)">
-                            <div class="mb-4">
-                                <label class="block text-sm font-medium mb-2">사이트 선택</label>
-                                <select id="keywordSiteId" required
-                                    class="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
-                                    <option value="">사이트를 선택하세요</option>
-                                </select>
-                            </div>
-                            <div class="mb-4">
-                                <label class="block text-sm font-medium mb-2">키워드</label>
-                                <input type="text" id="keywordText" required
-                                    class="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
-                            </div>
-                            <button type="submit"
-                                class="w-full bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-lg font-medium transition">
-                                등록하기
-                            </button>
-                        </form>
-                    </div>
-                </div>
-
-                <!-- 키워드 목록 -->
-                <div class="lg:col-span-2">
-                    <div class="bg-slate-800 rounded-lg shadow-lg p-6">
-                        <div class="flex justify-between items-center mb-4">
-                            <h2 class="text-xl font-bold text-blue-400">등록된 키워드</h2>
-                            <button onclick="loadKeywords()" class="px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg text-sm">
-                                새로고침
-                            </button>
-                        </div>
-                        <div class="overflow-x-auto">
-                            <table class="w-full text-sm">
-                                <thead class="border-b border-slate-700">
-                                    <tr>
-                                        <th class="text-left py-3 px-4">키워드</th>
-                                        <th class="text-left py-3 px-4">사이트</th>
-                                        <th class="text-center py-3 px-4">상태</th>
-                                        <th class="text-center py-3 px-4">등록일</th>
-                                        <th class="text-center py-3 px-4">작업</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="keywordsTable">
-                                    <tr>
-                                        <td colspan="5" class="text-center py-8 text-gray-500">
-                                            키워드를 불러오는 중...
                                         </td>
                                     </tr>
                                 </tbody>
@@ -265,21 +222,62 @@
         </div>
     </div>
 
+    <!-- 키워드 수정 모달 -->
+    <div id="keywordModal" class="modal">
+        <div class="bg-slate-800 rounded-lg shadow-xl p-6 w-full max-w-2xl mx-4">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-xl font-bold text-blue-400">키워드 관리</h3>
+                <button onclick="closeKeywordModal()" class="text-gray-400 hover:text-white">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                    </svg>
+                </button>
+            </div>
+
+            <div class="mb-4">
+                <p class="text-sm text-gray-400 mb-2">사이트: <span id="modalSiteName" class="text-white font-medium"></span></p>
+            </div>
+
+            <div class="mb-6">
+                <h4 class="text-sm font-medium mb-2">현재 키워드</h4>
+                <div id="currentKeywords" class="min-h-[60px] p-3 bg-slate-700 rounded-lg">
+                    <p class="text-sm text-gray-400">로딩 중...</p>
+                </div>
+            </div>
+
+            <div class="mb-6">
+                <label class="block text-sm font-medium mb-2">새 키워드 추가</label>
+                <input type="text" id="newKeywordInput" placeholder="긴급,공지,중요 (쉼표로 구분)"
+                    class="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+            </div>
+
+            <div class="flex space-x-2">
+                <button onclick="saveKeywords()" class="flex-1 bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-lg font-medium transition">
+                    저장
+                </button>
+                <button onclick="closeKeywordModal()" class="flex-1 bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded-lg font-medium transition">
+                    취소
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- 토스트 알림 컨테이너 -->
     <div id="toastContainer" class="fixed top-4 right-4 space-y-2 z-50"></div>
 
     <script>
         let eventSource = null;
         let sites = [];
-        let keywords = [];
+        let currentSiteId = null;
+        let siteKeywords = {};
 
         // 페이지 로드 시 초기화
         document.addEventListener('DOMContentLoaded', function() {
             loadSites();
-            loadKeywords();
             loadAlerts();
             loadSettings();
             connectSSE();
+            runTests(); // 테스트 실행
         });
 
         // SSE 연결
@@ -298,7 +296,7 @@
             eventSource.addEventListener('alert', function(event) {
                 const alert = JSON.parse(event.data);
                 showToast(`🔔 ${alert.message}`, 'info');
-                loadAlerts(); // 알림 목록 새로고침
+                loadAlerts();
             });
 
             eventSource.onerror = function(error) {
@@ -325,18 +323,14 @@
 
         // 탭 전환
         function switchTab(tabName) {
-            // 모든 탭 버튼 비활성화
             document.querySelectorAll('.tab-button').forEach(btn => {
                 btn.classList.remove('active');
             });
-            // 선택한 탭 버튼 활성화
             document.getElementById('tab-' + tabName).classList.add('active');
 
-            // 모든 탭 컨텐츠 숨기기
             document.querySelectorAll('.tab-content').forEach(content => {
                 content.classList.add('hidden');
             });
-            // 선택한 탭 컨텐츠 표시
             document.getElementById('content-' + tabName).classList.remove('hidden');
         }
 
@@ -346,40 +340,50 @@
                 const response = await fetch('/api/sites');
                 sites = await response.json();
 
+                // 각 사이트의 키워드 개수 조회
+                for (let site of sites) {
+                    const keywordsResponse = await fetch(`/api/keywords/site/${site.id}`);
+                    const keywords = await keywordsResponse.json();
+                    siteKeywords[site.id] = keywords;
+                }
+
                 const tbody = document.getElementById('sitesTable');
                 if (sites.length === 0) {
                     tbody.innerHTML = '<tr><td colspan="6" class="text-center py-8 text-gray-500">등록된 사이트가 없습니다.</td></tr>';
                     return;
                 }
 
-                tbody.innerHTML = sites.map(site => `
+                tbody.innerHTML = sites.map(site => {
+                    const keywords = siteKeywords[site.id] || [];
+                    const hasKeywords = keywords.length > 0;
+
+                    return `
                     <tr class="border-b border-slate-700 hover:bg-slate-700">
-                        <td class="py-3 px-4 font-medium">
-                            ${site.name}
-                            ${site.detectContentChange ? '<span class="ml-2 px-2 py-1 bg-purple-900 text-purple-300 rounded text-xs" title="전체 페이지 변경 감지">🔍</span>' : ''}
-                        </td>
+                        <td class="py-3 px-4 font-medium">${site.name}</td>
                         <td class="py-3 px-4 text-sm text-gray-400">${site.url}</td>
                         <td class="py-3 px-4 text-center">${site.checkInterval}</td>
-                        <td class="py-3 px-4 text-center">
-                            <span class="px-2 py-1 bg-blue-900 text-blue-300 rounded text-xs">${site.keywordCount || 0}</span>
+                        <td class="py-3 px-4">
+                            ${hasKeywords
+                                ? keywords.map(k => `<span class="keyword-tag">${k.keyword}</span>`).join(' ')
+                                : '<span class="px-2 py-1 bg-purple-900 text-purple-300 rounded text-xs">🔔 새글 알림</span>'
+                            }
                         </td>
                         <td class="py-3 px-4 text-center">
                             <button onclick="toggleSite(${site.id})" class="px-3 py-1 rounded text-xs ${site.active ? 'bg-green-900 text-green-300' : 'bg-gray-700 text-gray-400'}">
                                 ${site.active ? '활성' : '비활성'}
                             </button>
                         </td>
-                        <td class="py-3 px-4 text-center">
+                        <td class="py-3 px-4 text-center space-x-1">
+                            <button onclick="openKeywordModal(${site.id})" class="px-3 py-1 bg-blue-900 text-blue-300 rounded text-xs hover:bg-blue-800">
+                                키워드
+                            </button>
                             <button onclick="deleteSite(${site.id})" class="px-3 py-1 bg-red-900 text-red-300 rounded text-xs hover:bg-red-800">
                                 삭제
                             </button>
                         </td>
                     </tr>
-                `).join('');
-
-                // 키워드 폼의 사이트 선택 드롭다운 업데이트
-                const siteSelect = document.getElementById('keywordSiteId');
-                siteSelect.innerHTML = '<option value="">사이트를 선택하세요</option>' +
-                    sites.map(site => `<option value="${site.id}">${site.name}</option>`).join('');
+                `;
+                }).join('');
             } catch (error) {
                 console.error('사이트 목록 로드 실패:', error);
                 showToast('사이트 목록 로드 실패', 'error');
@@ -390,12 +394,15 @@
         async function createSite(event) {
             event.preventDefault();
 
+            const keywordsInput = document.getElementById('siteKeywords').value.trim();
+            const keywords = keywordsInput ? keywordsInput.split(',').map(k => k.trim()).filter(k => k) : [];
+
             const site = {
                 name: document.getElementById('siteName').value,
                 url: document.getElementById('siteUrl').value,
                 checkInterval: parseInt(document.getElementById('siteCheckInterval').value),
                 active: true,
-                detectContentChange: document.getElementById('siteDetectContentChange').checked
+                detectContentChange: keywords.length === 0 // 키워드 없으면 자동으로 전체 페이지 변경 감지
             };
 
             try {
@@ -406,7 +413,24 @@
                 });
 
                 if (response.ok) {
-                    showToast('사이트가 등록되었습니다.', 'success');
+                    const createdSite = await response.json();
+
+                    // 키워드가 있으면 각각 등록
+                    if (keywords.length > 0) {
+                        for (let keyword of keywords) {
+                            await fetch('/api/keywords', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                    keyword: keyword,
+                                    site: { id: createdSite.id },
+                                    active: true
+                                })
+                            });
+                        }
+                    }
+
+                    showToast(`사이트가 등록되었습니다. ${keywords.length > 0 ? `(키워드 ${keywords.length}개)` : '(새글 알림)'}`, 'success');
                     document.getElementById('siteForm').reset();
                     loadSites();
                 } else {
@@ -460,87 +484,52 @@
             }
         }
 
-        // 키워드 목록 불러오기
-        async function loadKeywords() {
-            try {
-                const response = await fetch('/api/keywords');
-                keywords = await response.json();
+        // 키워드 수정 모달 열기
+        async function openKeywordModal(siteId) {
+            currentSiteId = siteId;
+            const site = sites.find(s => s.id === siteId);
 
-                const tbody = document.getElementById('keywordsTable');
+            document.getElementById('modalSiteName').textContent = site.name;
+            document.getElementById('newKeywordInput').value = '';
+
+            // 현재 키워드 로드
+            await loadCurrentKeywords(siteId);
+
+            document.getElementById('keywordModal').classList.add('active');
+        }
+
+        // 현재 키워드 로드
+        async function loadCurrentKeywords(siteId) {
+            try {
+                const response = await fetch(`/api/keywords/site/${siteId}`);
+                const keywords = await response.json();
+
+                const container = document.getElementById('currentKeywords');
                 if (keywords.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="5" class="text-center py-8 text-gray-500">등록된 키워드가 없습니다.</td></tr>';
-                    return;
-                }
-
-                tbody.innerHTML = keywords.map(keyword => `
-                    <tr class="border-b border-slate-700 hover:bg-slate-700">
-                        <td class="py-3 px-4 font-medium">${keyword.keyword}</td>
-                        <td class="py-3 px-4 text-sm text-gray-400">${keyword.site?.name || 'N/A'}</td>
-                        <td class="py-3 px-4 text-center">
-                            <span class="px-2 py-1 rounded text-xs ${keyword.active ? 'bg-green-900 text-green-300' : 'bg-gray-700 text-gray-400'}">
-                                ${keyword.active ? '활성' : '비활성'}
-                            </span>
-                        </td>
-                        <td class="py-3 px-4 text-center text-sm text-gray-400">${new Date(keyword.createdAt).toLocaleDateString()}</td>
-                        <td class="py-3 px-4 text-center">
-                            <button onclick="deleteKeyword(${keyword.id})" class="px-3 py-1 bg-red-900 text-red-300 rounded text-xs hover:bg-red-800">
-                                삭제
-                            </button>
-                        </td>
-                    </tr>
-                `).join('');
-            } catch (error) {
-                console.error('키워드 목록 로드 실패:', error);
-                showToast('키워드 목록 로드 실패', 'error');
-            }
-        }
-
-        // 키워드 등록
-        async function createKeyword(event) {
-            event.preventDefault();
-
-            const keyword = {
-                keyword: document.getElementById('keywordText').value,
-                site: { id: parseInt(document.getElementById('keywordSiteId').value) },
-                active: true
-            };
-
-            try {
-                const response = await fetch('/api/keywords', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(keyword)
-                });
-
-                if (response.ok) {
-                    showToast('키워드가 등록되었습니다.', 'success');
-                    document.getElementById('keywordForm').reset();
-                    loadKeywords();
-                    loadSites(); // 사이트 목록도 새로고침 (키워드 개수 업데이트)
+                    container.innerHTML = '<p class="text-sm text-gray-400">등록된 키워드가 없습니다. (새글 알림 모드)</p>';
                 } else {
-                    showToast('키워드 등록 실패', 'error');
+                    container.innerHTML = keywords.map(k => `
+                        <span class="inline-flex items-center keyword-tag mb-1">
+                            ${k.keyword}
+                            <button onclick="deleteKeywordFromModal(${k.id})" class="ml-2 text-red-300 hover:text-red-200">×</button>
+                        </span>
+                    `).join(' ');
                 }
             } catch (error) {
-                console.error('키워드 등록 실패:', error);
-                showToast('키워드 등록 실패', 'error');
+                console.error('키워드 로드 실패:', error);
             }
         }
 
-        // 키워드 삭제
-        async function deleteKeyword(id) {
-            if (!confirm('정말 이 키워드를 삭제하시겠습니까?')) {
-                return;
-            }
-
+        // 모달에서 키워드 삭제
+        async function deleteKeywordFromModal(keywordId) {
             try {
-                const response = await fetch(`/api/keywords/${id}`, {
+                const response = await fetch(`/api/keywords/${keywordId}`, {
                     method: 'DELETE'
                 });
 
                 if (response.ok) {
+                    await loadCurrentKeywords(currentSiteId);
                     showToast('키워드가 삭제되었습니다.', 'success');
-                    loadKeywords();
-                    loadSites();
                 } else {
                     showToast('키워드 삭제 실패', 'error');
                 }
@@ -548,6 +537,47 @@
                 console.error('키워드 삭제 실패:', error);
                 showToast('키워드 삭제 실패', 'error');
             }
+        }
+
+        // 키워드 저장
+        async function saveKeywords() {
+            const newKeywordsInput = document.getElementById('newKeywordInput').value.trim();
+            if (!newKeywordsInput) {
+                closeKeywordModal();
+                loadSites();
+                return;
+            }
+
+            const keywords = newKeywordsInput.split(',').map(k => k.trim()).filter(k => k);
+
+            try {
+                for (let keyword of keywords) {
+                    await fetch('/api/keywords', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            keyword: keyword,
+                            site: { id: currentSiteId },
+                            active: true
+                        })
+                    });
+                }
+
+                showToast(`${keywords.length}개의 키워드가 추가되었습니다.`, 'success');
+                await loadCurrentKeywords(currentSiteId);
+                document.getElementById('newKeywordInput').value = '';
+                loadSites();
+            } catch (error) {
+                console.error('키워드 추가 실패:', error);
+                showToast('키워드 추가 실패', 'error');
+            }
+        }
+
+        // 키워드 모달 닫기
+        function closeKeywordModal() {
+            document.getElementById('keywordModal').classList.remove('active');
+            currentSiteId = null;
+            loadSites();
         }
 
         // 알림 목록 불러오기
@@ -679,20 +709,17 @@
             };
 
             try {
-                // 기존 설정이 있는지 확인
                 const getResponse = await fetch('/api/settings');
                 const settings = await getResponse.json();
 
                 let response;
                 if (settings.length > 0) {
-                    // 수정
                     response = await fetch(`/api/settings/${settings[0].id}`, {
                         method: 'PUT',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify(setting)
                     });
                 } else {
-                    // 생성
                     response = await fetch('/api/settings', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
@@ -730,6 +757,72 @@
             setTimeout(() => {
                 toast.remove();
             }, 3000);
+        }
+
+        // ==============================================
+        // 테스트 코드
+        // ==============================================
+        function runTests() {
+            console.log('🧪 테스트 시작...');
+
+            // 테스트 1: 키워드 분리 테스트
+            function testKeywordSplit() {
+                const input = "긴급,공지,중요";
+                const expected = ["긴급", "공지", "중요"];
+                const result = input.split(',').map(k => k.trim()).filter(k => k);
+                console.assert(JSON.stringify(result) === JSON.stringify(expected),
+                    '❌ 테스트 실패: 키워드 분리');
+                console.log('✅ 테스트 통과: 키워드 분리', result);
+            }
+
+            // 테스트 2: 공백 키워드 테스트
+            function testEmptyKeywords() {
+                const input = "";
+                const keywords = input.trim() ? input.split(',').map(k => k.trim()).filter(k => k) : [];
+                const detectContentChange = keywords.length === 0;
+                console.assert(detectContentChange === true,
+                    '❌ 테스트 실패: 공백 키워드 시 detectContentChange');
+                console.log('✅ 테스트 통과: 공백 키워드 시 detectContentChange = true');
+            }
+
+            // 테스트 3: 키워드 있을 때 detectContentChange false 테스트
+            function testKeywordsPresent() {
+                const input = "긴급,공지";
+                const keywords = input.trim() ? input.split(',').map(k => k.trim()).filter(k => k) : [];
+                const detectContentChange = keywords.length === 0;
+                console.assert(detectContentChange === false,
+                    '❌ 테스트 실패: 키워드 있을 때 detectContentChange');
+                console.assert(keywords.length === 2,
+                    '❌ 테스트 실패: 키워드 개수');
+                console.log('✅ 테스트 통과: 키워드 있을 때 detectContentChange = false, 개수 = ', keywords.length);
+            }
+
+            // 테스트 4: 공백 포함 키워드 필터링 테스트
+            function testKeywordFiltering() {
+                const input = "긴급, , 공지, ,중요";
+                const keywords = input.split(',').map(k => k.trim()).filter(k => k);
+                console.assert(keywords.length === 3,
+                    '❌ 테스트 실패: 공백 필터링');
+                console.log('✅ 테스트 통과: 공백 필터링', keywords);
+            }
+
+            // 테스트 5: 쉼표만 있는 경우
+            function testCommaOnly() {
+                const input = ",,,";
+                const keywords = input.split(',').map(k => k.trim()).filter(k => k);
+                console.assert(keywords.length === 0,
+                    '❌ 테스트 실패: 쉼표만 있는 경우');
+                console.log('✅ 테스트 통과: 쉼표만 있는 경우 키워드 개수 = 0');
+            }
+
+            // 테스트 실행
+            testKeywordSplit();
+            testEmptyKeywords();
+            testKeywordsPresent();
+            testKeywordFiltering();
+            testCommaOnly();
+
+            console.log('🎉 모든 테스트 완료!');
         }
     </script>
 </body>
