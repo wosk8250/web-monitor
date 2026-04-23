@@ -228,4 +228,27 @@ public class AlertController {
                     .body("알림 삭제 중 오류가 발생했습니다.");
         }
     }
+
+    /**
+     * 모든 알림 삭제 (읽음 + 안읽음 전체)
+     * DELETE /api/alerts/all
+     * @return 삭제된 알림 개수
+     */
+    @DeleteMapping("/all")
+    public ResponseEntity<String> deleteAllAlerts() {
+        log.info("DELETE /api/alerts/all - 모든 알림 삭제 요청");
+
+        try {
+            List<Alert> allAlerts = alertRepository.findAll();
+            int deletedCount = allAlerts.size();
+            alertRepository.deleteAll(allAlerts);
+
+            log.info("모든 알림 삭제 완료: {} 건", deletedCount);
+            return ResponseEntity.ok(deletedCount + "건의 알림이 삭제되었습니다.");
+        } catch (Exception e) {
+            log.error("알림 삭제 실패: {}", e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body("알림 삭제 중 오류가 발생했습니다.");
+        }
+    }
 }

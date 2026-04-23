@@ -173,8 +173,8 @@
                         <button onclick="loadAlerts()" class="px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg text-sm">
                             새로고침
                         </button>
-                        <button onclick="deleteReadAlerts()" class="px-4 py-2 bg-red-600 hover:bg-red-700 rounded-lg text-sm">
-                            읽은 알림 삭제
+                        <button onclick="deleteAllAlerts()" class="px-4 py-2 bg-red-600 hover:bg-red-700 rounded-lg text-sm">
+                            모두 삭제
                         </button>
                     </div>
                 </div>
@@ -601,14 +601,13 @@
                                     ${alert.keywordText ? `<span class="px-2 py-1 bg-purple-900 text-purple-300 rounded text-xs">${alert.keywordText}</span>` : '<span class="px-2 py-1 bg-purple-900 text-purple-300 rounded text-xs">페이지 변경</span>'}
                                     ${!alert.sent ? '<span class="px-2 py-1 bg-red-900 text-red-300 rounded text-xs">새 알림</span>' : ''}
                                 </div>
-                                ${alert.pageTitle ? `<a href="${alert.detectedUrl}" target="_blank" class="block text-base font-semibold mb-2 text-blue-400 hover:text-blue-300 hover:underline">${alert.pageTitle}</a>` : `<a href="${alert.detectedUrl}" target="_blank" class="block text-base font-semibold mb-2 text-blue-400 hover:text-blue-300 hover:underline">제목 없음</a>`}
+                                ${alert.pageTitle ? `<a href="#" onclick="markAlertAsReadAndOpen(${alert.id}, '${alert.detectedUrl}', ${alert.sent}); return false;" class="block text-base font-semibold mb-2 text-blue-400 hover:text-blue-300 hover:underline">${alert.pageTitle}</a>` : `<a href="#" onclick="markAlertAsReadAndOpen(${alert.id}, '${alert.detectedUrl}', ${alert.sent}); return false;" class="block text-base font-semibold mb-2 text-blue-400 hover:text-blue-300 hover:underline">제목 없음</a>`}
                                 <p class="text-sm mb-2">${alert.message}</p>
                                 <p class="text-xs text-gray-400">
                                     ${new Date(alert.detectedAt).toLocaleString()}
                                 </p>
                             </div>
                             <div class="flex flex-col space-y-2 ml-4">
-                                ${!alert.sent ? `<button onclick="markAlertAsRead(${alert.id})" class="px-3 py-1 bg-green-900 text-green-300 rounded text-xs hover:bg-green-800">읽음</button>` : ''}
                                 <button onclick="deleteAlert(${alert.id})" class="px-3 py-1 bg-red-900 text-red-300 rounded text-xs hover:bg-red-800">삭제</button>
                             </div>
                         </div>
@@ -678,6 +677,53 @@
             } catch (error) {
                 console.error('알림 삭제 실패:', error);
                 showToast('알림 삭제 실패', 'error');
+            }
+        }
+
+        // 모든 알림 삭제 (읽음 + 안읽음)
+        async function deleteAllAlerts() {
+            if (!confirm('모든 알림을 삭제하시겠습니까?')) {
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/alerts/all', {
+                    method: 'DELETE'
+                });
+
+                if (response.ok) {
+                    const text = await response.text();
+                    showToast(text, 'success');
+                    loadAlerts();
+                } else {
+                    showToast('알림 삭제 실패', 'error');
+                }
+            } catch (error) {
+                console.error('알림 삭제 실패:', error);
+                showToast('알림 삭제 실패', 'error');
+            }
+        }
+
+        // 알림 읽음 처리 후 URL 열기
+        async function markAlertAsReadAndOpen(id, url, isSent) {
+            try {
+                // 안 읽은 알림인 경우에만 읽음 처리
+                if (!isSent) {
+                    const response = await fetch(`/api/alerts/${id}/mark-sent`, {
+                        method: 'PATCH'
+                    });
+
+                    if (response.ok) {
+                        loadAlerts(); // 알림 목록 새로고침
+                    }
+                }
+
+                // URL 열기
+                window.open(url, '_blank');
+            } catch (error) {
+                console.error('알림 처리 실패:', error);
+                // 에러가 있어도 URL은 열어줌
+                window.open(url, '_blank');
             }
         }
 
