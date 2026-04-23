@@ -230,7 +230,7 @@ public class MonitorService {
                 "[%s] 키워드 '%s' 감지 - %s",
                 site.getName(),
                 keyword.getKeyword(),
-                pageTitle != null && !pageTitle.isEmpty() ? pageTitle : "제목 없음"
+                pageTitle != null && !pageTitle.trim().isEmpty() ? pageTitle : "제목 없음"
         );
 
         // Alert 엔티티 생성
@@ -269,7 +269,7 @@ public class MonitorService {
         String message = String.format(
                 "[%s] 새 글 - %s",
                 site.getName(),
-                pageTitle != null && !pageTitle.isEmpty() ? pageTitle : "제목 없음"
+                pageTitle != null && !pageTitle.trim().isEmpty() ? pageTitle : "제목 없음"
         );
 
         // Alert 엔티티 생성 (키워드 없이)

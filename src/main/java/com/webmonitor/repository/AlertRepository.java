@@ -52,4 +52,10 @@ public interface AlertRepository extends JpaRepository<Alert, Long> {
      * @return 해당 사이트의 미전송 알림 목록
      */
     List<Alert> findBySiteAndSent(Site site, Boolean sent);
+
+    /**
+     * 특정 사이트의 모든 알림 삭제
+     * @param siteId 사이트 ID
+     */
+    void deleteBySiteId(Long siteId);
 }

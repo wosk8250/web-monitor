@@ -31,6 +31,9 @@ class AlertControllerTest {
     @Autowired
     private AlertRepository alertRepository;
 
+    @Autowired
+    private com.webmonitor.repository.SiteRepository siteRepository;
+
     private Site testSite;
     private Alert testAlert1;
     private Alert testAlert2;
@@ -39,8 +42,9 @@ class AlertControllerTest {
     void setUp() {
         // 테스트 데이터 초기화
         alertRepository.deleteAll();
+        siteRepository.deleteAll();
 
-        // 테스트용 사이트 생성
+        // 테스트용 사이트 생성 및 저장
         testSite = Site.builder()
                 .name("테스트 사이트")
                 .url("https://test.com")
@@ -48,6 +52,7 @@ class AlertControllerTest {
                 .active(true)
                 .detectContentChange(false)
                 .build();
+        testSite = siteRepository.save(testSite);
 
         // 테스트용 알림 생성
         testAlert1 = Alert.builder()

@@ -1,7 +1,10 @@
 package com.webmonitor.controller;
 
 import com.webmonitor.domain.Keyword;
-import com.webmonitor.repository.KeywordRepository;
+import com.webmonitor.dto.KeywordRequest;
+import com.webmonitor.dto.KeywordResponse;
+import com.webmonitor.service.KeywordService;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
@@ -13,13 +16,13 @@ import java.util.List;
 /**
  * 키워드 관리 REST API 컨트롤러
  */
-@RestController // REST API 컨트롤러로 지정 (@Controller + @ResponseBody)
-@RequestMapping("/api/keywords") // 기본 URL 경로 설정
-@RequiredArgsConstructor // final 필드에 대한 생성자 자동 생성 (의존성 주입)
-@Slf4j // 로그 사용을 위한 Logger 자동 생성
+@RestController
+@RequestMapping("/api/keywords")
+@RequiredArgsConstructor
+@Slf4j
 public class KeywordController {
 
-    private final KeywordRepository keywordRepository;
+    private final KeywordService keywordService;
 
     /**
      * 모든 키워드 조회
@@ -27,9 +30,11 @@ public class KeywordController {
      * @return 전체 키워드 목록
      */
     @GetMapping
-    public ResponseEntity<List<Keyword>> getAllKeywords() {
+    public ResponseEntity<List<KeywordResponse>> getAllKeywords() {
         log.info("GET /api/keywords - 모든 키워드 조회 요청");
-        List<Keyword> keywords = keywordRepository.findAll();
+        List<KeywordResponse> keywords = keywordService.getAllKeywords().stream()
+                .map(KeywordResponse::from)
+                .toList();
         return ResponseEntity.ok(keywords);
     }
 
@@ -40,9 +45,10 @@ public class KeywordController {
      * @return 조회된 키워드
      */
     @GetMapping("/{id}")
-    public ResponseEntity<Keyword> getKeywordById(@PathVariable Long id) {
+    public ResponseEntity<KeywordResponse> getKeywordById(@PathVariable Long id) {
         log.info("GET /api/keywords/{} - 키워드 조회 요청", id);
-        return keywordRepository.findById(id)
+        return keywordService.getKeywordById(id)
+                .map(KeywordResponse::from)
                 .map(ResponseEntity::ok)
                 .orElse(ResponseEntity.notFound().build());
     }
@@ -53,9 +59,11 @@ public class KeywordController {
      * @return 활성화된 키워드 목록
      */
     @GetMapping("/active")
-    public ResponseEntity<List<Keyword>> getActiveKeywords() {
+    public ResponseEntity<List<KeywordResponse>> getActiveKeywords() {
         log.info("GET /api/keywords/active - 활성화된 키워드 조회 요청");
-        List<Keyword> keywords = keywordRepository.findByActive(true);
+        List<KeywordResponse> keywords = keywordService.getActiveKeywords().stream()
+                .map(KeywordResponse::from)
+                .toList();
         return ResponseEntity.ok(keywords);
     }
 
@@ -66,10 +74,10 @@ public class KeywordController {
      * @return 해당 사이트의 키워드 목록
      */
     @GetMapping("/site/{siteId}")
-    public ResponseEntity<List<Keyword>> getKeywordsBySite(@PathVariable Long siteId) {
+    public ResponseEntity<List<KeywordResponse>> getKeywordsBySite(@PathVariable Long siteId) {
         log.info("GET /api/keywords/site/{} - 사이트별 키워드 조회 요청", siteId);
-        List<Keyword> keywords = keywordRepository.findAll().stream()
-                .filter(keyword -> keyword.getSite() != null && keyword.getSite().getId().equals(siteId))
+        List<KeywordResponse> keywords = keywordService.getKeywordsBySite(siteId).stream()
+                .map(KeywordResponse::from)
                 .toList();
         return ResponseEntity.ok(keywords);
     }
@@ -80,10 +88,10 @@ public class KeywordController {
      * @return 전체 공통 키워드 목록
      */
     @GetMapping("/global")
-    public ResponseEntity<List<Keyword>> getGlobalKeywords() {
+    public ResponseEntity<List<KeywordResponse>> getGlobalKeywords() {
         log.info("GET /api/keywords/global - 전체 공통 키워드 조회 요청");
-        List<Keyword> keywords = keywordRepository.findAll().stream()
-                .filter(keyword -> keyword.getSite() == null)
+        List<KeywordResponse> keywords = keywordService.getGlobalKeywords().stream()
+                .map(KeywordResponse::from)
                 .toList();
         return ResponseEntity.ok(keywords);
     }
@@ -91,17 +99,21 @@ public class KeywordController {
     /**
      * 새로운 키워드 등록
      * POST /api/keywords
-     * @param keyword 등록할 키워드 정보 (JSON)
+     * @param request 등록할 키워드 정보 (JSON)
      * @return 생성된 키워드 정보
      */
     @PostMapping
-    public ResponseEntity<Keyword> createKeyword(@RequestBody Keyword keyword) {
-        log.info("POST /api/keywords - 키워드 등록 요청: {}", keyword.getKeyword());
+    public ResponseEntity<KeywordResponse> createKeyword(@Valid @RequestBody KeywordRequest request) {
+        log.info("POST /api/keywords - 키워드 등록 요청: keyword={}, siteId={}",
+                request.getKeyword(), request.getSiteId());
         try {
-            Keyword createdKeyword = keywordRepository.save(keyword);
-            return ResponseEntity.status(HttpStatus.CREATED).body(createdKeyword);
-        } catch (Exception e) {
+            Keyword createdKeyword = keywordService.createKeyword(request);
+            return ResponseEntity.status(HttpStatus.CREATED).body(KeywordResponse.from(createdKeyword));
+        } catch (IllegalArgumentException e) {
             log.error("키워드 등록 실패: {}", e.getMessage());
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).build();
+        } catch (Exception e) {
+            log.error("키워드 등록 중 오류 발생: {}", e.getMessage(), e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
         }
     }
@@ -110,24 +122,22 @@ public class KeywordController {
      * 키워드 정보 수정
      * PUT /api/keywords/{id}
      * @param id 수정할 키워드 ID
-     * @param updatedKeyword 수정할 키워드 정보 (JSON)
+     * @param request 수정할 키워드 정보 (JSON)
      * @return 수정된 키워드 정보
      */
     @PutMapping("/{id}")
-    public ResponseEntity<Keyword> updateKeyword(@PathVariable Long id, @RequestBody Keyword updatedKeyword) {
+    public ResponseEntity<KeywordResponse> updateKeyword(
+            @PathVariable Long id,
+            @Valid @RequestBody KeywordRequest request) {
         log.info("PUT /api/keywords/{} - 키워드 수정 요청", id);
         try {
-            return keywordRepository.findById(id)
-                    .map(keyword -> {
-                        keyword.setKeyword(updatedKeyword.getKeyword());
-                        keyword.setActive(updatedKeyword.getActive());
-                        keyword.setSite(updatedKeyword.getSite());
-                        Keyword saved = keywordRepository.save(keyword);
-                        return ResponseEntity.ok(saved);
-                    })
-                    .orElse(ResponseEntity.notFound().build());
-        } catch (Exception e) {
+            Keyword updatedKeyword = keywordService.updateKeyword(id, request);
+            return ResponseEntity.ok(KeywordResponse.from(updatedKeyword));
+        } catch (IllegalArgumentException e) {
             log.error("키워드 수정 실패: {}", e.getMessage());
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).build();
+        } catch (Exception e) {
+            log.error("키워드 수정 중 오류 발생: {}", e.getMessage(), e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
         }
     }
@@ -142,16 +152,14 @@ public class KeywordController {
     public ResponseEntity<Void> deleteKeyword(@PathVariable Long id) {
         log.info("DELETE /api/keywords/{} - 키워드 삭제 요청", id);
         try {
-            if (!keywordRepository.existsById(id)) {
-                log.error("키워드를 찾을 수 없습니다: ID = {}", id);
-                return ResponseEntity.notFound().build();
-            }
-
-            keywordRepository.deleteById(id);
+            keywordService.deleteKeyword(id);
             log.info("키워드 삭제 완료: ID = {}", id);
             return ResponseEntity.noContent().build();
+        } catch (IllegalArgumentException e) {
+            log.error("키워드 삭제 실패: {}", e.getMessage());
+            return ResponseEntity.notFound().build();
         } catch (Exception e) {
-            log.error("키워드 삭제 중 오류 발생: {}", e.getMessage());
+            log.error("키워드 삭제 중 오류 발생: {}", e.getMessage(), e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
         }
     }
@@ -163,19 +171,16 @@ public class KeywordController {
      * @return 변경된 키워드 정보
      */
     @PatchMapping("/{id}/toggle")
-    public ResponseEntity<Keyword> toggleKeywordActive(@PathVariable Long id) {
+    public ResponseEntity<KeywordResponse> toggleKeywordActive(@PathVariable Long id) {
         log.info("PATCH /api/keywords/{}/toggle - 키워드 활성화 상태 변경 요청", id);
         try {
-            return keywordRepository.findById(id)
-                    .map(keyword -> {
-                        keyword.setActive(!keyword.getActive());
-                        Keyword saved = keywordRepository.save(keyword);
-                        log.info("키워드 활성화 상태 변경 완료: ID = {}, Active = {}", id, saved.getActive());
-                        return ResponseEntity.ok(saved);
-                    })
-                    .orElse(ResponseEntity.notFound().build());
+            Keyword toggledKeyword = keywordService.toggleKeywordActive(id);
+            return ResponseEntity.ok(KeywordResponse.from(toggledKeyword));
+        } catch (IllegalArgumentException e) {
+            log.error("키워드 토글 실패: {}", e.getMessage());
+            return ResponseEntity.notFound().build();
         } catch (Exception e) {
-            log.error("키워드 활성화 토글 중 오류 발생: {}", e.getMessage());
+            log.error("키워드 활성화 토글 중 오류 발생: {}", e.getMessage(), e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
         }
     }

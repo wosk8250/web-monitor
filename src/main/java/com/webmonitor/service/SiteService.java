@@ -1,6 +1,8 @@
 package com.webmonitor.service;
 
 import com.webmonitor.domain.Site;
+import com.webmonitor.repository.AlertRepository;
+import com.webmonitor.repository.KeywordRepository;
 import com.webmonitor.repository.SiteRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -20,6 +22,8 @@ import java.util.Optional;
 public class SiteService {
 
     private final SiteRepository siteRepository;
+    private final AlertRepository alertRepository;
+    private final KeywordRepository keywordRepository;
 
     /**
      * 새로운 사이트 등록
@@ -66,11 +70,21 @@ public class SiteService {
     public void deleteSite(Long id) {
         log.info("사이트 삭제 시작: ID = {}", id);
 
-        if (!siteRepository.existsById(id)) {
-            throw new IllegalArgumentException("사이트를 찾을 수 없습니다. ID: " + id);
-        }
+        // 사이트 존재 여부 확인
+        Site site = siteRepository.findById(id)
+                .orElseThrow(() -> new IllegalArgumentException("사이트를 찾을 수 없습니다. ID: " + id));
 
-        siteRepository.deleteById(id);
+        // 외래 키 제약 조건 때문에 연관된 엔티티를 먼저 삭제
+        // 1. 해당 사이트의 모든 알림 삭제
+        alertRepository.deleteBySiteId(id);
+        log.debug("사이트 ID {}의 모든 알림 삭제 완료", id);
+
+        // 2. 해당 사이트의 모든 키워드 삭제
+        keywordRepository.deleteBySiteId(id);
+        log.debug("사이트 ID {}의 모든 키워드 삭제 완료", id);
+
+        // 3. 사이트 삭제
+        siteRepository.delete(site);
         log.info("사이트 삭제 완료: ID = {}", id);
     }
 

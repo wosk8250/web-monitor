@@ -42,4 +42,10 @@ public interface KeywordRepository extends JpaRepository<Keyword, Long> {
      * @return 일치하는 키워드 목록
      */
     List<Keyword> findByKeywordContaining(String keyword);
+
+    /**
+     * 특정 사이트의 모든 키워드 삭제
+     * @param siteId 사이트 ID
+     */
+    void deleteBySiteId(Long siteId);
 }
