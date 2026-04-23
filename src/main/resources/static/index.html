@@ -169,7 +169,10 @@
             <div class="bg-slate-800 rounded-lg shadow-lg p-6">
                 <div class="flex justify-between items-center mb-4">
                     <h2 class="text-xl font-bold text-blue-400">알림 목록</h2>
-                    <div class="space-x-2">
+                    <div class="flex items-center space-x-2">
+                        <select id="siteFilter" onchange="loadAlerts()" class="px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-sm focus:ring-2 focus:ring-blue-500">
+                            <option value="">전체 사이트</option>
+                        </select>
                         <button onclick="loadAlerts()" class="px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg text-sm">
                             새로고침
                         </button>
@@ -274,6 +277,7 @@
         // 페이지 로드 시 초기화
         document.addEventListener('DOMContentLoaded', function() {
             loadSites();
+            loadSitesForFilter(); // 사이트 필터 드롭다운 초기화
             loadAlerts();
             loadSettings();
             connectSSE();
@@ -583,7 +587,13 @@
         // 알림 목록 불러오기
         async function loadAlerts() {
             try {
-                const response = await fetch('/api/alerts');
+                // 선택된 사이트 필터 가져오기
+                const siteFilter = document.getElementById('siteFilter');
+                const selectedSiteId = siteFilter ? siteFilter.value : '';
+
+                // 필터에 따라 API 엔드포인트 결정
+                const url = selectedSiteId ? `/api/alerts/site/${selectedSiteId}` : '/api/alerts';
+                const response = await fetch(url);
                 const alerts = await response.json();
 
                 const alertsList = document.getElementById('alertsList');
@@ -724,6 +734,31 @@
                 console.error('알림 처리 실패:', error);
                 // 에러가 있어도 URL은 열어줌
                 window.open(url, '_blank');
+            }
+        }
+
+        // 사이트 필터 드롭다운 채우기
+        async function loadSitesForFilter() {
+            try {
+                const response = await fetch('/api/sites');
+                const sites = await response.json();
+
+                const siteFilter = document.getElementById('siteFilter');
+                if (!siteFilter) return;
+
+                // 기존 옵션 유지하고 사이트 옵션 추가
+                siteFilter.innerHTML = '<option value="">전체 사이트</option>';
+
+                sites.forEach(site => {
+                    const option = document.createElement('option');
+                    option.value = site.id;
+                    option.textContent = site.name;
+                    siteFilter.appendChild(option);
+                });
+
+                console.log(`사이트 필터 로드 완료: ${sites.length}개 사이트`);
+            } catch (error) {
+                console.error('사이트 필터 로드 실패:', error);
             }
         }
 
