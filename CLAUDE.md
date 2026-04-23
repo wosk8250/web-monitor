@@ -61,3 +61,18 @@ The application uses `application.properties` for configuration:
 
 Base package: `com.webmonitor`
 - Main application class: `WebMonitorApplication.java`
+
+## 프로젝트 규칙
+
+### 테스트 작성 필수
+- 새로운 Service/Controller/Repository 메서드를 작성할 때는
+  반드시 대응하는 테스트 코드를 함께 작성한다
+- 테스트 없이 구현만 제출하는 것은 "미완성"으로 간주한다
+- 테스트 프레임워크: JUnit 5, Mockito, AssertJ
+- 테스트 실행 명령: `./mvnw test` 또는 `mvn test`
+- 작업 완료 전 반드시 전체 테스트를 실행해서 통과 여부 확인
+
+### 테스트 커버 범위
+- 정상 케이스 (Happy Path)
+- 예외 케이스 (Exception)
+- 경계값 (Edge Case)
