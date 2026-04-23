@@ -227,9 +227,10 @@ public class MonitorService {
     public void createAlert(Site site, Keyword keyword, String pageTitle, String detectedUrl) {
         // 알림 메시지 생성
         String message = String.format(
-                "[%s] 사이트에서 키워드 '%s'가 감지되었습니다.",
+                "[%s] 키워드 '%s' 감지 - %s",
                 site.getName(),
-                keyword.getKeyword()
+                keyword.getKeyword(),
+                pageTitle != null && !pageTitle.isEmpty() ? pageTitle : "제목 없음"
         );
 
         // Alert 엔티티 생성
@@ -266,8 +267,9 @@ public class MonitorService {
     public void createContentChangeAlert(Site site, String pageTitle, String detectedUrl) {
         // 알림 메시지 생성
         String message = String.format(
-                "[%s] 사이트의 내용이 변경되었습니다.",
-                site.getName()
+                "[%s] 새 글 - %s",
+                site.getName(),
+                pageTitle != null && !pageTitle.isEmpty() ? pageTitle : "제목 없음"
         );
 
         // Alert 엔티티 생성 (키워드 없이)
