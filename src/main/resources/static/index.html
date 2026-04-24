@@ -121,6 +121,12 @@
                                     class="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
                                 <p class="text-xs text-slate-400 mt-1">키워드를 입력하지 않으면 자동으로 새글 알림으로 설정됩니다.</p>
                             </div>
+                            <div class="mb-4">
+                                <label class="block text-sm font-medium mb-2">게시글 링크 CSS 선택자 (선택사항)</label>
+                                <input type="text" id="siteArticleSelector" placeholder="예: a.ub-word, tr.ub-content a (비우면 자동 감지)"
+                                    class="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                                <p class="text-xs text-slate-400 mt-1">개별 게시글 링크를 찾을 CSS 선택자. 비우면 자동으로 일반적인 패턴을 시도합니다.</p>
+                            </div>
                             <button type="submit"
                                 class="w-full bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-lg font-medium transition">
                                 등록하기
@@ -265,6 +271,58 @@
         </div>
     </div>
 
+    <!-- 사이트 수정 모달 -->
+    <div id="editSiteModal" class="modal">
+        <div class="bg-slate-800 rounded-lg shadow-xl p-6 w-full max-w-2xl mx-4">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-xl font-bold text-purple-400">사이트 수정</h3>
+                <button onclick="closeEditSiteModal()" class="text-gray-400 hover:text-white">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                    </svg>
+                </button>
+            </div>
+
+            <form id="editSiteForm" onsubmit="updateSite(event)">
+                <input type="hidden" id="editSiteId">
+
+                <div class="mb-4">
+                    <label class="block text-sm font-medium mb-2">사이트 이름</label>
+                    <input type="text" id="editSiteName" required
+                        class="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent">
+                </div>
+
+                <div class="mb-4">
+                    <label class="block text-sm font-medium mb-2">URL</label>
+                    <input type="url" id="editSiteUrl" required
+                        class="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent">
+                </div>
+
+                <div class="mb-4">
+                    <label class="block text-sm font-medium mb-2">체크 주기 (분)</label>
+                    <input type="number" id="editSiteCheckInterval" min="1" required
+                        class="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent">
+                </div>
+
+                <div class="mb-4">
+                    <label class="block text-sm font-medium mb-2">게시글 링크 CSS 선택자 (선택사항)</label>
+                    <input type="text" id="editSiteArticleSelector" placeholder="예: a.ub-word, tr.ub-content a (비우면 자동 감지)"
+                        class="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent">
+                    <p class="text-xs text-slate-400 mt-1">개별 게시글 링크를 찾을 CSS 선택자. 비우면 자동으로 일반적인 패턴을 시도합니다.</p>
+                </div>
+
+                <div class="flex space-x-2">
+                    <button type="submit" class="flex-1 bg-purple-600 hover:bg-purple-700 px-4 py-2 rounded-lg font-medium transition">
+                        수정
+                    </button>
+                    <button type="button" onclick="closeEditSiteModal()" class="flex-1 bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded-lg font-medium transition">
+                        취소
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <!-- 토스트 알림 컨테이너 -->
     <div id="toastContainer" class="fixed top-4 right-4 space-y-2 z-50"></div>
 
@@ -378,6 +436,9 @@
                             </button>
                         </td>
                         <td class="py-3 px-4 text-center space-x-1">
+                            <button onclick="openEditSiteModal(${site.id})" class="px-3 py-1 bg-purple-900 text-purple-300 rounded text-xs hover:bg-purple-800">
+                                수정
+                            </button>
                             <button onclick="openKeywordModal(${site.id})" class="px-3 py-1 bg-blue-900 text-blue-300 rounded text-xs hover:bg-blue-800">
                                 키워드
                             </button>
@@ -400,11 +461,13 @@
 
             const keywordsInput = document.getElementById('siteKeywords').value.trim();
             const keywords = keywordsInput ? keywordsInput.split(',').map(k => k.trim()).filter(k => k) : [];
+            const articleSelector = document.getElementById('siteArticleSelector').value.trim();
 
             const site = {
                 name: document.getElementById('siteName').value,
                 url: document.getElementById('siteUrl').value,
                 checkInterval: parseInt(document.getElementById('siteCheckInterval').value),
+                articleSelector: articleSelector || null,  // 빈 문자열이면 null로 전송
                 active: true,
                 detectContentChange: keywords.length === 0 // 키워드 없으면 자동으로 전체 페이지 변경 감지
             };
@@ -581,6 +644,72 @@
         function closeKeywordModal() {
             document.getElementById('keywordModal').classList.remove('active');
             currentSiteId = null;
+            loadSites();
+        }
+
+        // 사이트 수정 모달 열기
+        async function openEditSiteModal(siteId) {
+            try {
+                const response = await fetch(`/api/sites/${siteId}`);
+                if (response.ok) {
+                    const site = await response.json();
+
+                    // 폼 필드에 현재 값 채우기
+                    document.getElementById('editSiteId').value = site.id;
+                    document.getElementById('editSiteName').value = site.name;
+                    document.getElementById('editSiteUrl').value = site.url;
+                    document.getElementById('editSiteCheckInterval').value = site.checkInterval;
+                    document.getElementById('editSiteArticleSelector').value = site.articleSelector || '';
+
+                    // 모달 열기
+                    document.getElementById('editSiteModal').classList.add('active');
+                } else {
+                    showToast('사이트 정보 로드 실패', 'error');
+                }
+            } catch (error) {
+                console.error('사이트 정보 로드 실패:', error);
+                showToast('사이트 정보 로드 실패', 'error');
+            }
+        }
+
+        // 사이트 수정
+        async function updateSite(event) {
+            event.preventDefault();
+
+            const siteId = document.getElementById('editSiteId').value;
+            const articleSelector = document.getElementById('editSiteArticleSelector').value.trim();
+
+            const site = {
+                name: document.getElementById('editSiteName').value,
+                url: document.getElementById('editSiteUrl').value,
+                checkInterval: parseInt(document.getElementById('editSiteCheckInterval').value),
+                articleSelector: articleSelector || null,  // 빈 문자열이면 null로 전송
+                active: true  // 활성 상태 유지
+            };
+
+            try {
+                const response = await fetch(`/api/sites/${siteId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(site)
+                });
+
+                if (response.ok) {
+                    showToast('사이트가 수정되었습니다.', 'success');
+                    closeEditSiteModal();
+                } else {
+                    showToast('사이트 수정 실패', 'error');
+                }
+            } catch (error) {
+                console.error('사이트 수정 실패:', error);
+                showToast('사이트 수정 실패', 'error');
+            }
+        }
+
+        // 사이트 수정 모달 닫기
+        function closeEditSiteModal() {
+            document.getElementById('editSiteModal').classList.remove('active');
+            document.getElementById('editSiteForm').reset();
             loadSites();
         }
 

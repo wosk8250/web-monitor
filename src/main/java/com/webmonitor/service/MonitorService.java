@@ -94,12 +94,12 @@ public class MonitorService {
                 }
             }
 
-            // articleSelector가 설정되어 있으면 개별 게시글 모드
-            if (site.getArticleSelector() != null && !site.getArticleSelector().trim().isEmpty()) {
-                log.info("개별 게시글 추출 모드: {}", site.getName());
-                extractAndProcessArticles(site, document);
-            } else {
-                // 기존 방식: 키워드 감지
+            // 개별 게시글 추출 시도 (articleSelector 설정 여부와 무관하게 시도)
+            boolean articlesExtracted = extractAndProcessArticles(site, document);
+
+            // 게시글 추출 실패 시 전체 페이지 키워드 감지로 fallback
+            if (!articlesExtracted) {
+                log.info("개별 게시글 추출 실패, 전체 페이지 키워드 감지 모드로 전환: {}", site.getName());
                 detectKeywords(site, pageText, pageTitle, document.location());
             }
 
@@ -307,14 +307,94 @@ public class MonitorService {
     }
 
     /**
+     * 게시글 링크 추출 (articleSelector 또는 fallback 패턴 사용)
+     * @param site 사이트 정보
+     * @param document JSoup Document
+     * @return 추출된 게시글 링크 Elements
+     */
+    private Elements tryExtractArticleLinks(Site site, Document document) {
+        String selector = site.getArticleSelector();
+
+        // articleSelector가 설정되어 있으면 사용
+        if (selector != null && !selector.trim().isEmpty()) {
+            Elements links = document.select(selector);
+            if (!links.isEmpty()) {
+                log.info("설정된 선택자로 게시글 링크 추출: {} 개 (선택자: {})", links.size(), selector);
+                return links;
+            }
+            log.warn("설정된 선택자로 링크를 찾을 수 없음. Fallback 시도: {}", selector);
+        }
+
+        // Fallback: 일반적인 패턴 시도
+        log.info("articleSelector가 비어있거나 추출 실패. Fallback 패턴 시도: {}", site.getName());
+
+        String[] fallbackPatterns = {
+                "a.ub-word",              // 디시인사이드 갤러리
+                "tr.ub-content a",        // 디시인사이드 (테이블 행)
+                "a[href*='/board/']",     // 게시판 링크 패턴
+                "a[href*='/post/']",      // 포스트 링크 패턴
+                "a[href*='/article/']",   // 아티클 링크 패턴
+                "a.title",                // 제목 클래스
+                "a.post-title",           // 포스트 제목
+                "a.post-link",            // 포스트 링크
+                "a.article-title"         // 아티클 제목
+        };
+
+        for (String pattern : fallbackPatterns) {
+            Elements links = document.select(pattern);
+            if (!links.isEmpty()) {
+                log.info("Fallback 패턴 '{}' 성공: {} 개 링크 발견", pattern, links.size());
+                return links;
+            }
+        }
+
+        // 마지막 시도: 모든 a 태그에서 조건에 맞는 것만 필터링
+        log.info("모든 Fallback 패턴 실패. 일반 a 태그 필터링 시도: {}", site.getName());
+        Elements allLinks = document.select("a[href]");
+        Elements filtered = new Elements();
+
+        String baseUrl = site.getUrl();
+        for (Element link : allLinks) {
+            String href = link.attr("abs:href");  // 절대 URL
+            String text = link.text().trim();
+
+            // 조건: 같은 도메인 내부 링크이고, 텍스트가 있고, 최소 길이 이상
+            if (!text.isEmpty() && text.length() >= 3) {
+                // 내부 링크 확인 (base URL과 같은 도메인)
+                if (href.startsWith(baseUrl) || !href.startsWith("http")) {
+                    // 이미지나 파일 다운로드 링크 제외
+                    if (!href.matches(".*\\.(jpg|jpeg|png|gif|pdf|zip|exe)$")) {
+                        filtered.add(link);
+                    }
+                }
+            }
+        }
+
+        if (!filtered.isEmpty()) {
+            log.info("일반 a 태그 필터링 성공: {} 개 링크 발견", filtered.size());
+            return filtered;
+        }
+
+        log.warn("모든 추출 시도 실패: {}", site.getName());
+        return new Elements();  // 빈 Elements 반환
+    }
+
+    /**
      * 개별 게시글 추출 및 처리
      * @param site 사이트 정보
      * @param document JSoup Document
      */
-    private void extractAndProcessArticles(Site site, Document document) {
+    private boolean extractAndProcessArticles(Site site, Document document) {
         try {
-            // CSS 셀렉터로 게시글 링크 추출
-            Elements articleLinks = document.select(site.getArticleSelector());
+            // articleSelector 또는 fallback 패턴으로 게시글 링크 추출
+            Elements articleLinks = tryExtractArticleLinks(site, document);
+
+            // 추출된 링크가 없으면 실패
+            if (articleLinks.isEmpty()) {
+                log.warn("게시글 링크를 찾을 수 없습니다: {}", site.getName());
+                return false;
+            }
+
             log.info("발견한 게시글 링크 수: {} (사이트: {})", articleLinks.size(), site.getName());
 
             int newArticleCount = 0;
@@ -365,9 +445,11 @@ public class MonitorService {
             }
 
             log.info("신규 게시글 처리 완료: {} 개 (사이트: {})", newArticleCount, site.getName());
+            return true;  // 게시글 추출 성공
 
         } catch (Exception e) {
             log.error("게시글 추출 중 오류 발생: {} - {}", site.getName(), e.getMessage(), e);
+            return false;  // 게시글 추출 실패
         }
     }
 
