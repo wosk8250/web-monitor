@@ -192,16 +192,27 @@ public class SseService {
             log.info("디스코드 웹훅 전송 시작: 알림 ID = {}", alert.getId());
 
             // 디스코드 메시지 페이로드 생성
+            // 제목 설정 (페이지 제목 또는 기본값)
+            String embedTitle = alert.getPageTitle() != null && !alert.getPageTitle().trim().isEmpty()
+                    ? alert.getPageTitle()
+                    : "제목 없음";
+
+            // 키워드 값 설정 (null 체크)
+            String keywordValue = alert.getKeyword() != null
+                    ? alert.getKeyword().getKeyword()
+                    : "새글 감지";
+
             Map<String, Object> payload = Map.of(
                     "content", alert.getMessage(),
                     "embeds", new Object[]{
                             Map.of(
-                                    "title", "🔔 키워드 감지 알림",
+                                    "title", embedTitle,
+                                    "url", alert.getDetectedUrl(),  // 제목 클릭 시 URL 이동
                                     "description", alert.getMessage(),
                                     "color", 5814783, // 파란색
                                     "fields", new Object[]{
                                             Map.of("name", "사이트", "value", alert.getSite().getName(), "inline", true),
-                                            Map.of("name", "키워드", "value", alert.getKeyword().getKeyword(), "inline", true),
+                                            Map.of("name", "키워드", "value", keywordValue, "inline", true),
                                             Map.of("name", "URL", "value", alert.getDetectedUrl(), "inline", false)
                                     },
                                     "timestamp", alert.getDetectedAt().toString()

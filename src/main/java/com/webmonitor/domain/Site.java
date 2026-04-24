@@ -41,6 +41,12 @@ public class Site {
     @Column(nullable = false) // null 불가
     private Boolean detectContentChange = false; // 전체 페이지 변경 감지 여부 (기본값: false)
 
+    @Column(length = 64) // SHA-256 해시값 저장 (64자)
+    private String lastContentHash; // 마지막 크롤링한 콘텐츠의 해시값 (중복 감지용)
+
+    @Column(length = 500)
+    private String articleSelector; // 게시글 링크를 찾기 위한 CSS 셀렉터 (예: "a.article-title", ".post-link")
+
     @CreationTimestamp // 엔티티 생성 시 자동으로 현재 시간 저장
     @Column(nullable = false, updatable = false) // null 불가, 수정 불가
     private LocalDateTime createdAt; // 생성 시간

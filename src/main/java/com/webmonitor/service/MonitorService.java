@@ -1,15 +1,19 @@
 package com.webmonitor.service;
 
 import com.webmonitor.domain.Alert;
+import com.webmonitor.domain.Article;
 import com.webmonitor.domain.Keyword;
 import com.webmonitor.domain.Site;
 import com.webmonitor.repository.AlertRepository;
+import com.webmonitor.repository.ArticleRepository;
 import com.webmonitor.repository.KeywordRepository;
 import com.webmonitor.repository.SiteRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
+import org.jsoup.nodes.Element;
+import org.jsoup.select.Elements;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -17,9 +21,9 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * 웹사이트 모니터링 및 키워드 감지를 처리하는 서비스
@@ -32,10 +36,8 @@ public class MonitorService {
     private final SiteRepository siteRepository;
     private final KeywordRepository keywordRepository;
     private final AlertRepository alertRepository;
+    private final ArticleRepository articleRepository;
     private final SseService sseService; // SSE 실시간 알림 서비스
-
-    // 사이트별 이전 해시값을 메모리에 저장 (실제 운영환경에서는 DB나 Redis 사용 권장)
-    private final Map<Long, String> siteContentHashMap = new HashMap<>();
 
     /**
      * 모든 활성화된 사이트 모니터링 실행
@@ -81,7 +83,7 @@ public class MonitorService {
 
             // 해시값 계산 및 변경 감지
             String currentHash = calculateHash(pageText);
-            boolean contentChanged = detectContentChange(site.getId(), currentHash);
+            boolean contentChanged = detectContentChange(site, currentHash);
 
             if (contentChanged) {
                 log.info("사이트 내용 변경 감지: {}", site.getName());
@@ -92,8 +94,14 @@ public class MonitorService {
                 }
             }
 
-            // 키워드 감지
-            detectKeywords(site, pageText, pageTitle, document.location());
+            // articleSelector가 설정되어 있으면 개별 게시글 모드
+            if (site.getArticleSelector() != null && !site.getArticleSelector().trim().isEmpty()) {
+                log.info("개별 게시글 추출 모드: {}", site.getName());
+                extractAndProcessArticles(site, document);
+            } else {
+                // 기존 방식: 키워드 감지
+                detectKeywords(site, pageText, pageTitle, document.location());
+            }
 
         } catch (IOException e) {
             log.error("사이트 크롤링 실패: {} - {}", site.getName(), e.getMessage());
@@ -150,18 +158,19 @@ public class MonitorService {
     }
 
     /**
-     * 사이트 내용 변경 감지
-     * @param siteId 사이트 ID
+     * 사이트 내용 변경 감지 (DB 기반)
+     * @param site 사이트 정보
      * @param currentHash 현재 해시값
      * @return 변경 여부 (true: 변경됨, false: 변경 안됨)
      */
-    private boolean detectContentChange(Long siteId, String currentHash) {
-        String previousHash = siteContentHashMap.get(siteId);
+    private boolean detectContentChange(Site site, String currentHash) {
+        String previousHash = site.getLastContentHash();
 
         // 이전 해시값이 없으면 최초 실행
         if (previousHash == null) {
-            log.debug("최초 모니터링 - 해시값 저장: Site ID = {}", siteId);
-            siteContentHashMap.put(siteId, currentHash);
+            log.debug("최초 모니터링 - 해시값 저장: Site ID = {}, Site Name = {}", site.getId(), site.getName());
+            site.setLastContentHash(currentHash);
+            siteRepository.save(site);
             return false;
         }
 
@@ -169,8 +178,9 @@ public class MonitorService {
         boolean changed = !previousHash.equals(currentHash);
 
         if (changed) {
-            log.info("내용 변경 감지: Site ID = {}", siteId);
-            siteContentHashMap.put(siteId, currentHash); // 새로운 해시값 저장
+            log.info("내용 변경 감지: Site ID = {}, Site Name = {}", site.getId(), site.getName());
+            site.setLastContentHash(currentHash); // 새로운 해시값 저장
+            siteRepository.save(site);
         }
 
         return changed;
@@ -297,19 +307,209 @@ public class MonitorService {
     }
 
     /**
-     * 특정 사이트의 저장된 해시값 초기화
-     * @param siteId 사이트 ID
+     * 개별 게시글 추출 및 처리
+     * @param site 사이트 정보
+     * @param document JSoup Document
      */
-    public void resetSiteHash(Long siteId) {
-        siteContentHashMap.remove(siteId);
-        log.info("사이트 해시값 초기화: Site ID = {}", siteId);
+    private void extractAndProcessArticles(Site site, Document document) {
+        try {
+            // CSS 셀렉터로 게시글 링크 추출
+            Elements articleLinks = document.select(site.getArticleSelector());
+            log.info("발견한 게시글 링크 수: {} (사이트: {})", articleLinks.size(), site.getName());
+
+            int newArticleCount = 0;
+
+            for (Element linkElement : articleLinks) {
+                try {
+                    String articleUrl = linkElement.absUrl("href");
+                    String articleTitle = linkElement.text();
+
+                    // URL이 비어있으면 스킵
+                    if (articleUrl.isEmpty()) {
+                        continue;
+                    }
+
+                    // 게시글 ID 추출 (URL에서)
+                    String articleId = extractArticleId(articleUrl);
+
+                    // 이미 저장된 게시글인지 확인
+                    boolean alreadyExists = false;
+                    if (articleId != null && !articleId.isEmpty()) {
+                        alreadyExists = articleRepository.existsBySiteAndArticleId(site, articleId);
+                    } else {
+                        alreadyExists = articleRepository.existsBySiteAndArticleUrl(site, articleUrl);
+                    }
+
+                    // 신규 게시글인 경우에만 처리
+                    if (!alreadyExists) {
+                        log.info("신규 게시글 발견: {} - {}", articleTitle, articleUrl);
+
+                        // Article 엔티티 생성 및 저장
+                        Article article = Article.builder()
+                                .site(site)
+                                .articleUrl(articleUrl)
+                                .articleTitle(articleTitle)
+                                .articleId(articleId)
+                                .build();
+                        articleRepository.save(article);
+
+                        // 키워드 확인 후 Alert 생성
+                        processArticleForKeywords(site, article, articleTitle, articleUrl);
+
+                        newArticleCount++;
+                    }
+
+                } catch (Exception e) {
+                    log.error("게시글 처리 중 오류: {}", e.getMessage(), e);
+                }
+            }
+
+            log.info("신규 게시글 처리 완료: {} 개 (사이트: {})", newArticleCount, site.getName());
+
+        } catch (Exception e) {
+            log.error("게시글 추출 중 오류 발생: {} - {}", site.getName(), e.getMessage(), e);
+        }
     }
 
     /**
-     * 모든 사이트의 저장된 해시값 초기화
+     * URL에서 게시글 ID 추출
+     * @param url 게시글 URL
+     * @return 게시글 ID (추출 실패 시 null)
+     */
+    private String extractArticleId(String url) {
+        try {
+            // 일반적인 게시글 ID 패턴들
+            // 예: /board/123, /post/456, /article/789, ?id=123, ?no=456
+            Pattern[] patterns = {
+                    Pattern.compile("/board/(\\d+)"),
+                    Pattern.compile("/post/(\\d+)"),
+                    Pattern.compile("/article/(\\d+)"),
+                    Pattern.compile("/view/(\\d+)"),
+                    Pattern.compile("[?&]id=(\\d+)"),
+                    Pattern.compile("[?&]no=(\\d+)"),
+                    Pattern.compile("[?&]num=(\\d+)"),
+                    Pattern.compile("/\\d+/(\\d+)"),  // /category/123 형태
+            };
+
+            for (Pattern pattern : patterns) {
+                Matcher matcher = pattern.matcher(url);
+                if (matcher.find()) {
+                    return matcher.group(1);
+                }
+            }
+
+            // ID 추출 실패 시 null 반환
+            return null;
+
+        } catch (Exception e) {
+            log.warn("게시글 ID 추출 실패: {} - {}", url, e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * 게시글에서 키워드 확인 및 Alert 생성
+     * @param site 사이트
+     * @param article 게시글
+     * @param articleTitle 게시글 제목
+     * @param articleUrl 게시글 URL
+     */
+    private void processArticleForKeywords(Site site, Article article, String articleTitle, String articleUrl) {
+        // 사이트별 키워드 조회
+        List<Keyword> siteKeywords = site.getKeywords().stream()
+                .filter(Keyword::getActive)
+                .toList();
+
+        // 전체 공통 키워드 조회
+        List<Keyword> globalKeywords = keywordRepository.findByActive(true).stream()
+                .filter(keyword -> keyword.getSite() == null)
+                .toList();
+
+        // 제목에서 키워드 검색
+        for (Keyword keyword : siteKeywords) {
+            if (articleTitle.contains(keyword.getKeyword())) {
+                createArticleAlert(site, keyword, articleTitle, articleUrl);
+            }
+        }
+
+        for (Keyword keyword : globalKeywords) {
+            if (articleTitle.contains(keyword.getKeyword())) {
+                createArticleAlert(site, keyword, articleTitle, articleUrl);
+            }
+        }
+
+        // 키워드가 없으면 단순 신규 글 알림
+        if (siteKeywords.isEmpty() && globalKeywords.isEmpty()) {
+            createArticleAlert(site, null, articleTitle, articleUrl);
+        }
+    }
+
+    /**
+     * 게시글 Alert 생성
+     * @param site 사이트
+     * @param keyword 키워드 (null 가능)
+     * @param articleTitle 게시글 제목
+     * @param articleUrl 게시글 URL
+     */
+    private void createArticleAlert(Site site, Keyword keyword, String articleTitle, String articleUrl) {
+        String message;
+        if (keyword != null) {
+            message = String.format(
+                    "[%s] 키워드 '%s' 감지 - %s",
+                    site.getName(),
+                    keyword.getKeyword(),
+                    articleTitle
+            );
+        } else {
+            message = String.format(
+                    "[%s] 새 글 - %s",
+                    site.getName(),
+                    articleTitle
+            );
+        }
+
+        Alert alert = Alert.builder()
+                .site(site)
+                .keyword(keyword)
+                .message(message)
+                .pageTitle(articleTitle)
+                .detectedUrl(articleUrl)
+                .sent(false)
+                .build();
+
+        Alert savedAlert = alertRepository.save(alert);
+        log.info("게시글 Alert 생성 완료: ID = {}, 제목 = {}", savedAlert.getId(), articleTitle);
+
+        // SSE 실시간 알림 전송
+        try {
+            sseService.broadcastAlert(savedAlert);
+            log.info("실시간 알림 전송 완료: 알림 ID = {}", savedAlert.getId());
+        } catch (Exception e) {
+            log.error("실시간 알림 전송 실패: {}", e.getMessage(), e);
+        }
+    }
+
+    /**
+     * 특정 사이트의 저장된 해시값 초기화 (DB 기반)
+     * @param siteId 사이트 ID
+     */
+    public void resetSiteHash(Long siteId) {
+        siteRepository.findById(siteId).ifPresent(site -> {
+            site.setLastContentHash(null);
+            siteRepository.save(site);
+            log.info("사이트 해시값 초기화: Site ID = {}, Site Name = {}", siteId, site.getName());
+        });
+    }
+
+    /**
+     * 모든 사이트의 저장된 해시값 초기화 (DB 기반)
      */
     public void resetAllHashes() {
-        siteContentHashMap.clear();
-        log.info("모든 사이트 해시값 초기화");
+        List<Site> allSites = siteRepository.findAll();
+        for (Site site : allSites) {
+            site.setLastContentHash(null);
+            siteRepository.save(site);
+        }
+        log.info("모든 사이트 해시값 초기화: {} 개 사이트", allSites.size());
     }
 }
