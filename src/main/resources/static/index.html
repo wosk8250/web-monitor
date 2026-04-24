@@ -611,7 +611,7 @@
                                     ${alert.keywordText ? `<span class="px-2 py-1 bg-purple-900 text-purple-300 rounded text-xs">${alert.keywordText}</span>` : '<span class="px-2 py-1 bg-purple-900 text-purple-300 rounded text-xs">페이지 변경</span>'}
                                     ${!alert.sent ? '<span class="px-2 py-1 bg-red-900 text-red-300 rounded text-xs">새 알림</span>' : ''}
                                 </div>
-                                ${alert.pageTitle ? `<a href="#" onclick="markAlertAsReadAndOpen(${alert.id}, '${alert.detectedUrl}', ${alert.sent}); return false;" class="block text-base font-semibold mb-2 text-blue-400 hover:text-blue-300 hover:underline">${alert.pageTitle}</a>` : `<a href="#" onclick="markAlertAsReadAndOpen(${alert.id}, '${alert.detectedUrl}', ${alert.sent}); return false;" class="block text-base font-semibold mb-2 text-blue-400 hover:text-blue-300 hover:underline">제목 없음</a>`}
+                                ${alert.pageTitle ? `<a href="#" onclick="markAlertAsReadAndOpen(${alert.id}, '${alert.detectedUrl}', ${alert.sent}); return false;" class="block text-base font-semibold mb-2 text-blue-400 hover:text-blue-300 hover:underline">새 글 알림 - ${alert.pageTitle}</a>` : `<a href="#" onclick="markAlertAsReadAndOpen(${alert.id}, '${alert.detectedUrl}', ${alert.sent}); return false;" class="block text-base font-semibold mb-2 text-blue-400 hover:text-blue-300 hover:underline">새 글 알림 - 제목 없음</a>`}
                                 <p class="text-sm mb-2">${alert.message}</p>
                                 <p class="text-xs text-gray-400">
                                     ${new Date(alert.detectedAt).toLocaleString()}
