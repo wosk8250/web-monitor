@@ -349,4 +349,33 @@ class KeywordControllerTest {
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(response.getBody()).hasSize(2);
     }
+
+    @Test
+    @DisplayName("키워드 등록 - DB에서 site_id 확인")
+    void createKeyword_VerifySiteIdInDatabase() {
+        // Given
+        KeywordRequest request = KeywordRequest.builder()
+                .keyword("DB 검증 키워드")
+                .siteId(testSite.getId())
+                .active(true)
+                .build();
+
+        // When
+        ResponseEntity<KeywordResponse> response = restTemplate.postForEntity(
+                "/api/keywords",
+                request,
+                KeywordResponse.class
+        );
+
+        // Then - API 응답 확인
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        assertThat(response.getBody()).isNotNull();
+        assertThat(response.getBody().getSiteId()).isEqualTo(testSite.getId());
+
+        // Then - DB에서 직접 확인
+        Keyword savedKeyword = keywordRepository.findAll().get(0);
+        assertThat(savedKeyword.getSite()).isNotNull();
+        assertThat(savedKeyword.getSite().getId()).isEqualTo(testSite.getId());
+        assertThat(savedKeyword.getKeyword()).isEqualTo("DB 검증 키워드");
+    }
 }

@@ -427,7 +427,7 @@
                                 headers: { 'Content-Type': 'application/json' },
                                 body: JSON.stringify({
                                     keyword: keyword,
-                                    site: { id: createdSite.id },
+                                    siteId: createdSite.id,
                                     active: true
                                 })
                             });
@@ -561,7 +561,7 @@
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
                             keyword: keyword,
-                            site: { id: currentSiteId },
+                            siteId: currentSiteId,
                             active: true
                         })
                     });
