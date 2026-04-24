@@ -22,7 +22,6 @@ import static org.assertj.core.api.Assertions.assertThat;
  * AlertController 통합 테스트
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-@Transactional
 class AlertControllerTest {
 
     @Autowired
