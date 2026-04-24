@@ -103,15 +103,27 @@ public class KeywordController {
      * @return 생성된 키워드 정보
      */
     @PostMapping
-    public ResponseEntity<KeywordResponse> createKeyword(@Valid @RequestBody KeywordRequest request) {
+    public ResponseEntity<?> createKeyword(@Valid @RequestBody KeywordRequest request) {
         log.info("POST /api/keywords - 키워드 등록 요청: keyword={}, siteId={}",
                 request.getKeyword(), request.getSiteId());
         try {
             Keyword createdKeyword = keywordService.createKeyword(request);
+
+            // 공백 키워드 = 새글 감지 활성화 (키워드 저장 안함)
+            if (createdKeyword == null) {
+                return ResponseEntity.ok().body(new java.util.HashMap<String, String>() {{
+                    put("message", "새글 감지 기능이 활성화되었습니다");
+                }});
+            }
+
+            // 일반 키워드 저장
             return ResponseEntity.status(HttpStatus.CREATED).body(KeywordResponse.from(createdKeyword));
         } catch (IllegalArgumentException e) {
             log.error("키워드 등록 실패: {}", e.getMessage());
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST).build();
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(new java.util.HashMap<String, String>() {{
+                        put("error", e.getMessage());
+                    }});
         } catch (Exception e) {
             log.error("키워드 등록 중 오류 발생: {}", e.getMessage(), e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();

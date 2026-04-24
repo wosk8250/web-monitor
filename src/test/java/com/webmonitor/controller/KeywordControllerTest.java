@@ -112,24 +112,58 @@ class KeywordControllerTest {
     }
 
     @Test
-    @DisplayName("키워드 등록 - 실패 (keyword가 빈 문자열)")
-    void createKeyword_WithEmptyKeyword_Fail() {
-        // Given
+    @DisplayName("공백 키워드 등록 → 새글 감지 자동 활성화")
+    void createKeyword_WithEmptyKeyword_EnablesContentDetection() {
+        // Given: detectContentChange=false인 사이트
+        testSite.setDetectContentChange(false);
+        testSite = siteRepository.save(testSite);
+
         KeywordRequest request = KeywordRequest.builder()
-                .keyword("")  // 빈 문자열
+                .keyword("")  // 빈 문자열 → 새글 감지 활성화
                 .siteId(testSite.getId())
                 .active(true)
                 .build();
 
         // When
-        ResponseEntity<KeywordResponse> response = restTemplate.postForEntity(
+        ResponseEntity<java.util.Map> response = restTemplate.postForEntity(
                 "/api/keywords",
                 request,
-                KeywordResponse.class
+                java.util.Map.class
+        );
+
+        // Then
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getBody()).containsKey("message");
+        assertThat(response.getBody().get("message")).isEqualTo("새글 감지 기능이 활성화되었습니다");
+
+        // DB 확인: Site의 detectContentChange가 true로 변경됨
+        Site updatedSite = siteRepository.findById(testSite.getId()).orElseThrow();
+        assertThat(updatedSite.getDetectContentChange()).isTrue();
+
+        // 키워드는 저장되지 않음
+        assertThat(keywordRepository.count()).isZero();
+    }
+
+    @Test
+    @DisplayName("공백 키워드 등록 - 실패 (siteId null)")
+    void createKeyword_WithEmptyKeywordAndNullSiteId_Fail() {
+        // Given: 공백 키워드는 특정 사이트에만 허용
+        KeywordRequest request = KeywordRequest.builder()
+                .keyword("")  // 빈 문자열
+                .siteId(null)  // 전체 공통 키워드로는 불가
+                .active(true)
+                .build();
+
+        // When
+        ResponseEntity<java.util.Map> response = restTemplate.postForEntity(
+                "/api/keywords",
+                request,
+                java.util.Map.class
         );
 
         // Then
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(response.getBody()).containsKey("error");
         assertThat(keywordRepository.count()).isZero();
     }
 

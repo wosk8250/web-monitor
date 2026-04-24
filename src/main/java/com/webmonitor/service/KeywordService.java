@@ -34,7 +34,33 @@ public class KeywordService {
     public Keyword createKeyword(KeywordRequest request) {
         log.info("키워드 등록 시작: keyword={}, siteId={}", request.getKeyword(), request.getSiteId());
 
-        // siteId가 있으면 Site 엔티티 조회
+        // 키워드 검증 (null은 불가)
+        if (request.getKeyword() == null) {
+            throw new IllegalArgumentException("키워드는 null일 수 없습니다");
+        }
+
+        // 공백 키워드 처리 → 새글 감지 활성화
+        if (request.getKeyword().trim().isEmpty()) {
+            log.info("공백 키워드 감지 - 새글 감지 기능 활성화");
+
+            // 공백 키워드는 특정 사이트에만 허용
+            if (request.getSiteId() == null) {
+                throw new IllegalArgumentException("공백 키워드(새글 감지)는 특정 사이트에만 설정할 수 있습니다");
+            }
+
+            Site site = siteRepository.findById(request.getSiteId())
+                    .orElseThrow(() -> new IllegalArgumentException("사이트를 찾을 수 없습니다. ID: " + request.getSiteId()));
+
+            // 새글 감지 활성화
+            site.setDetectContentChange(true);
+            siteRepository.save(site);
+            log.info("사이트 '{}' 새글 감지 활성화 완료", site.getName());
+
+            // 키워드는 저장하지 않음 (null 반환)
+            return null;
+        }
+
+        // 일반 키워드 처리
         Site site = null;
         if (request.getSiteId() != null) {
             site = siteRepository.findById(request.getSiteId())
