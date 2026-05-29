@@ -219,13 +219,7 @@ public class MonitorService {
      * @throws IOException 크롤링 실패 시
      */
     private Document crawlWebsite(String url) throws IOException {
-        // SSRF 공격 방어를 위한 URL 검증
-        try {
-            UrlUtils.validateUrl(url);
-        } catch (IllegalArgumentException e) {
-            log.error("URL 검증 실패: {} - {}", url, e.getMessage());
-            throw new IOException("유효하지 않은 URL입니다: " + e.getMessage(), e);
-        }
+        validateUrlForCrawling(url);
 
         int attempt = 0;
         IOException lastException = null;
@@ -234,48 +228,11 @@ public class MonitorService {
             attempt++;
 
             try {
-                // User-Agent 랜덤 선택 (ThreadLocalRandom: thread-safe)
-                String userAgent = WebCrawlerConstants.USER_AGENTS[ThreadLocalRandom.current().nextInt(WebCrawlerConstants.USER_AGENTS.length)];
-
-                // JSoup으로 웹페이지 가져오기
-                // timeout: connection 5초, read 15초
-                Document document = Jsoup.connect(url)
-                        .timeout(WebCrawlerConstants.TIMEOUT_DEFAULT_MS)           // connection timeout: 5초
-                        .maxBodySize(0)          // 본문 크기 제한 없음
-                        .userAgent(userAgent)    // 랜덤 User-Agent
-                        .followRedirects(true)   // 리다이렉트 자동 따라가기
-                        .get();
-
-                return document;
+                return attemptCrawl(url);
 
             } catch (HttpStatusException e) {
-                int statusCode = e.getStatusCode();
-                log.warn("HTTP 상태 코드 오류: {} - {}", statusCode, url);
-
-                // HTTP 상태 코드별 처리
-                switch (statusCode) {
-                    case 404:
-                        // 404는 재시도 불필요
-                        throw new IOException("페이지를 찾을 수 없습니다 (404): " + url, e);
-
-                    case 429:
-                        // Too Many Requests - 대기 시간 증가
-                        log.warn("요청 제한 (429) - 대기 후 재시도: {}", url);
-                        lastException = e;
-                        break;
-
-                    case 500:
-                    case 502:
-                    case 503:
-                        // 서버 오류 - 재시도 가능
-                        log.warn("서버 오류 ({}) - 재시도: {}", statusCode, url);
-                        lastException = e;
-                        break;
-
-                    default:
-                        // 기타 오류는 그대로 전파
-                        throw new IOException("HTTP 오류 " + statusCode + ": " + url, e);
-                }
+                handleHttpStatusException(e, url);
+                lastException = e;
 
             } catch (SocketTimeoutException e) {
                 log.warn("크롤링 타임아웃 (시도 {}/{}): {} - 5초 초과",
@@ -299,20 +256,96 @@ public class MonitorService {
 
             // 마지막 시도가 아니면 대기 후 재시도 (지수 백오프)
             if (attempt < WebCrawlerConstants.MAX_RETRY_ATTEMPTS) {
-                long delayMs = WebCrawlerConstants.INITIAL_RETRY_DELAY_MS * (1 << (attempt - 1)); // 1초, 2초, 4초
-
-                try {
-                    Thread.sleep(delayMs);
-                } catch (InterruptedException ie) {
-                    Thread.currentThread().interrupt();
-                    throw new IOException("크롤링 재시도 중 중단됨: " + url, ie);
-                }
+                performRetryDelay(attempt, url);
             }
         }
 
         // 모든 재시도 실패
         log.error("크롤링 최종 실패 ({}번 시도): {}", WebCrawlerConstants.MAX_RETRY_ATTEMPTS, url);
         throw new IOException("크롤링 최종 실패 after " + WebCrawlerConstants.MAX_RETRY_ATTEMPTS + " attempts: " + url, lastException);
+    }
+
+    /**
+     * URL 유효성 검증 (SSRF 공격 방어)
+     * @param url 검증할 URL
+     * @throws IOException 유효하지 않은 URL인 경우
+     */
+    private void validateUrlForCrawling(String url) throws IOException {
+        try {
+            UrlUtils.validateUrl(url);
+        } catch (IllegalArgumentException e) {
+            log.error("URL 검증 실패: {} - {}", url, e.getMessage());
+            throw new IOException("유효하지 않은 URL입니다: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * 단일 크롤링 시도 수행
+     * @param url 크롤링할 URL
+     * @return JSoup Document 객체
+     * @throws IOException 크롤링 실패 시
+     */
+    private Document attemptCrawl(String url) throws IOException {
+        // User-Agent 랜덤 선택 (ThreadLocalRandom: thread-safe)
+        String userAgent = WebCrawlerConstants.USER_AGENTS[ThreadLocalRandom.current().nextInt(WebCrawlerConstants.USER_AGENTS.length)];
+
+        // JSoup으로 웹페이지 가져오기
+        return Jsoup.connect(url)
+                .timeout(WebCrawlerConstants.TIMEOUT_DEFAULT_MS)
+                .maxBodySize(0)          // 본문 크기 제한 없음
+                .userAgent(userAgent)    // 랜덤 User-Agent
+                .followRedirects(true)   // 리다이렉트 자동 따라가기
+                .get();
+    }
+
+    /**
+     * HTTP 상태 코드 예외 처리
+     * @param e HTTP 상태 예외
+     * @param url 요청 URL
+     * @throws IOException 재시도 불필요한 오류인 경우
+     */
+    private void handleHttpStatusException(HttpStatusException e, String url) throws IOException {
+        int statusCode = e.getStatusCode();
+        log.warn("HTTP 상태 코드 오류: {} - {}", statusCode, url);
+
+        switch (statusCode) {
+            case 404:
+                // 404는 재시도 불필요
+                throw new IOException("페이지를 찾을 수 없습니다 (404): " + url, e);
+
+            case 429:
+                // Too Many Requests - 대기 시간 증가
+                log.warn("요청 제한 (429) - 대기 후 재시도: {}", url);
+                break;
+
+            case 500:
+            case 502:
+            case 503:
+                // 서버 오류 - 재시도 가능
+                log.warn("서버 오류 ({}) - 재시도: {}", statusCode, url);
+                break;
+
+            default:
+                // 기타 오류는 그대로 전파
+                throw new IOException("HTTP 오류 " + statusCode + ": " + url, e);
+        }
+    }
+
+    /**
+     * 재시도 대기 (Exponential Backoff)
+     * @param attempt 현재 시도 횟수
+     * @param url 요청 URL
+     * @throws IOException 인터럽트 발생 시
+     */
+    private void performRetryDelay(int attempt, String url) throws IOException {
+        long delayMs = WebCrawlerConstants.INITIAL_RETRY_DELAY_MS * (1 << (attempt - 1)); // 1초, 2초, 4초
+
+        try {
+            Thread.sleep(delayMs);
+        } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
+            throw new IOException("크롤링 재시도 중 중단됨: " + url, ie);
+        }
     }
 
     /**

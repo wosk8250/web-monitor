@@ -158,51 +158,21 @@ public class AdvancedCrawlerService {
     public boolean checkRobotsTxt(String url) {
         try {
             URI uri = new URI(url);
-            String scheme = uri.getScheme();
-            String host = uri.getHost();
 
             // scheme이나 host가 null이면 허용으로 간주
-            if (scheme == null || host == null) {
+            if (uri.getScheme() == null || uri.getHost() == null) {
                 log.debug("URL 파싱 결과 scheme 또는 host가 null (허용으로 간주): {}", url);
                 return true;
             }
 
-            String robotsUrl = scheme + "://" + host + "/robots.txt";
-
+            String robotsUrl = buildRobotsTxtUrl(uri);
             log.debug("robots.txt 확인: {}", robotsUrl);
 
-            // robots.txt 파일 가져오기
-            Document robotsDoc = Jsoup.connect(robotsUrl)
-                    .timeout(WebCrawlerConstants.TIMEOUT_SHORT_MS)
-                    .userAgent(WebCrawlerConstants.USER_AGENTS[0])
-                    .ignoreContentType(true)  // plain text로 처리
-                    .get();
+            String robotsContent = fetchRobotsTxt(robotsUrl);
+            boolean isPathDisallowed = parseRobotsTxt(robotsContent, uri.getPath(), url);
 
-            String robotsContent = robotsDoc.text();
-
-            // 간단한 robots.txt 파싱
-            // User-agent: * 섹션에서 Disallow 규칙 확인
-            String[] lines = robotsContent.split("\n");
-            boolean checkingGeneralAgent = false;
-
-            for (String line : lines) {
-                line = line.trim();
-
-                // User-agent: * 섹션 시작
-                if (line.toLowerCase().startsWith("user-agent:")) {
-                    checkingGeneralAgent = line.contains("*");
-                }
-
-                // Disallow 규칙 확인 (User-agent: * 섹션에서만)
-                if (checkingGeneralAgent && line.toLowerCase().startsWith("disallow:")) {
-                    String disallowedPath = line.substring("disallow:".length()).trim();
-
-                    // URL 경로가 Disallow된 경로로 시작하면 거부
-                    if (!disallowedPath.isEmpty() && uri.getPath().startsWith(disallowedPath)) {
-                        log.warn("robots.txt에 의해 크롤링 거부됨: {} (Disallow: {})", url, disallowedPath);
-                        return false;
-                    }
-                }
+            if (isPathDisallowed) {
+                return false;
             }
 
             log.debug("robots.txt 확인 완료: {} (허용)", url);
@@ -228,6 +198,67 @@ public class AdvancedCrawlerService {
             log.debug("robots.txt 파일 없음 또는 접근 실패: {} (허용으로 간주)", url);
             return true; // robots.txt가 없으면 허용으로 간주
         }
+    }
+
+    /**
+     * robots.txt URL 생성
+     * @param uri 원본 URI
+     * @return robots.txt URL
+     */
+    private String buildRobotsTxtUrl(URI uri) {
+        return uri.getScheme() + "://" + uri.getHost() + "/robots.txt";
+    }
+
+    /**
+     * robots.txt 파일 다운로드
+     * @param robotsUrl robots.txt URL
+     * @return robots.txt 내용
+     * @throws IOException 다운로드 실패 시
+     */
+    private String fetchRobotsTxt(String robotsUrl) throws IOException {
+        Document robotsDoc = Jsoup.connect(robotsUrl)
+                .timeout(WebCrawlerConstants.TIMEOUT_SHORT_MS)
+                .userAgent(WebCrawlerConstants.USER_AGENTS[0])
+                .ignoreContentType(true)  // plain text로 처리
+                .get();
+
+        return robotsDoc.text();
+    }
+
+    /**
+     * robots.txt 파싱 및 Disallow 규칙 확인
+     * @param robotsContent robots.txt 내용
+     * @param urlPath 확인할 URL 경로
+     * @param originalUrl 원본 URL (로깅용)
+     * @return 크롤링 거부 여부 (true: 거부, false: 허용)
+     */
+    private boolean parseRobotsTxt(String robotsContent, String urlPath, String originalUrl) {
+        // 간단한 robots.txt 파싱
+        // User-agent: * 섹션에서 Disallow 규칙 확인
+        String[] lines = robotsContent.split("\n");
+        boolean checkingGeneralAgent = false;
+
+        for (String line : lines) {
+            line = line.trim();
+
+            // User-agent: * 섹션 시작
+            if (line.toLowerCase().startsWith("user-agent:")) {
+                checkingGeneralAgent = line.contains("*");
+            }
+
+            // Disallow 규칙 확인 (User-agent: * 섹션에서만)
+            if (checkingGeneralAgent && line.toLowerCase().startsWith("disallow:")) {
+                String disallowedPath = line.substring("disallow:".length()).trim();
+
+                // URL 경로가 Disallow된 경로로 시작하면 거부
+                if (!disallowedPath.isEmpty() && urlPath.startsWith(disallowedPath)) {
+                    log.warn("robots.txt에 의해 크롤링 거부됨: {} (Disallow: {})", originalUrl, disallowedPath);
+                    return true;  // 거부
+                }
+            }
+        }
+
+        return false;  // 허용
     }
 
     /**
