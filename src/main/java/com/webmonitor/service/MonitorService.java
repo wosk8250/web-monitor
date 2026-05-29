@@ -3,25 +3,39 @@ package com.webmonitor.service;
 import com.webmonitor.domain.Alert;
 import com.webmonitor.domain.Article;
 import com.webmonitor.domain.Keyword;
+import com.webmonitor.domain.Setting;
 import com.webmonitor.domain.Site;
+import com.webmonitor.event.SseTransmissionFailureEvent;
 import com.webmonitor.repository.AlertRepository;
 import com.webmonitor.repository.ArticleRepository;
 import com.webmonitor.repository.KeywordRepository;
+import com.webmonitor.repository.SettingRepository;
 import com.webmonitor.repository.SiteRepository;
+import com.webmonitor.util.HashUtils;
+import com.webmonitor.util.UrlUtils;
+import com.webmonitor.util.WebCrawlerConstants;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.jsoup.HttpStatusException;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
+import java.net.ConnectException;
+import java.net.SocketTimeoutException;
+import java.net.UnknownHostException;
 import java.util.List;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -37,21 +51,36 @@ public class MonitorService {
     private final KeywordRepository keywordRepository;
     private final AlertRepository alertRepository;
     private final ArticleRepository articleRepository;
+    private final SettingRepository settingRepository;
     private final SseService sseService; // SSE 실시간 알림 서비스
+    private final DiscordService discordService; // 디스코드 웹훅 서비스
+    private final AlertService alertService; // 알림 서비스 (우선순위 기반 처리)
+    private final ApplicationEventPublisher eventPublisher; // 이벤트 발행
+
+
+
+    // 알림 정리 설정 (application.properties에서 주입)
+    @Value("${monitor.alert.max-per-site:50}")
+    private int maxAlertsPerSite;
 
     /**
      * 모든 활성화된 사이트 모니터링 실행
+     * 트랜잭션 밖에서 실행하여 HTTP 크롤링 시 DB 커넥션 점유 방지
      */
-    @Transactional
     public void monitorAllActiveSites() {
         log.info("활성화된 사이트 모니터링 시작");
 
-        List<Site> activeSites = siteRepository.findByActive(true);
-        log.info("모니터링할 사이트 수: {}", activeSites.size());
+        // 활성 사이트 조회 (읽기 전용 트랜잭션으로 빠르게 커밋)
+        List<Site> activeSites = getActiveSitesWithKeywords();
+        log.debug("모니터링할 사이트 수: {}", activeSites.size());
 
+        // HTTP 크롤링은 트랜잭션 밖에서 수행 (DB 커넥션 점유 최소화)
         for (Site site : activeSites) {
             try {
-                monitorSite(site);
+                // 주기 확인 후 모니터링
+                if (shouldCheckSite(site)) {
+                    monitorSite(site);
+                }
             } catch (Exception e) {
                 log.error("사이트 모니터링 중 오류 발생: {} - {}", site.getName(), e.getMessage(), e);
             }
@@ -61,15 +90,41 @@ public class MonitorService {
     }
 
     /**
+     * 활성 사이트 목록 조회 (읽기 전용 트랜잭션)
+     * N+1 쿼리 방지: keywords를 즉시 로딩 (1개 JOIN 쿼리로 모든 사이트+키워드 조회)
+     */
+    @Transactional(readOnly = true)
+    protected List<Site> getActiveSitesWithKeywords() {
+        return siteRepository.findByActiveWithKeywords(true);
+    }
+
+    /**
+     * 사이트 체크 주기 확인
+     */
+    private boolean shouldCheckSite(Site site) {
+        // 처음 체크하는 경우
+        if (site.getLastCheckedAt() == null) {
+            return true;
+        }
+
+        // 설정된 주기가 지났는지 확인
+        long minutesElapsed = java.time.Duration.between(
+                site.getLastCheckedAt(),
+                java.time.LocalDateTime.now()
+        ).toMinutes();
+
+        return minutesElapsed >= site.getCheckIntervalMinutes();
+    }
+
+    /**
      * 특정 사이트 모니터링
      * @param site 모니터링할 사이트
      */
-    @Transactional
     public void monitorSite(Site site) {
         log.info("사이트 모니터링 시작: {}", site.getName());
 
         try {
-            // JSoup을 사용하여 웹페이지 크롤링
+            // JSoup을 사용하여 웹페이지 크롤링 (트랜잭션 밖에서 실행)
             Document document = crawlWebsite(site.getUrl());
 
             // 페이지 제목 추출
@@ -81,53 +136,183 @@ public class MonitorService {
             // 본문 내용만 텍스트 추출
             String pageText = document.body().text();
 
-            // 해시값 계산 및 변경 감지
+            // 해시값 계산
             String currentHash = calculateHash(pageText);
-            boolean contentChanged = detectContentChange(site, currentHash);
 
-            if (contentChanged) {
-                log.info("사이트 내용 변경 감지: {}", site.getName());
-
-                // 전체 페이지 변경 감지 옵션이 활성화된 경우 알림 생성
-                if (site.getDetectContentChange()) {
-                    createContentChangeAlert(site, pageTitle, document.location());
-                }
-            }
-
-            // 개별 게시글 추출 시도 (articleSelector 설정 여부와 무관하게 시도)
-            boolean articlesExtracted = extractAndProcessArticles(site, document);
-
-            // 게시글 추출 실패 시 전체 페이지 키워드 감지로 fallback
-            if (!articlesExtracted) {
-                log.info("개별 게시글 추출 실패, 전체 페이지 키워드 감지 모드로 전환: {}", site.getName());
-                detectKeywords(site, pageText, pageTitle, document.location());
-            }
+            // DB 작업은 별도 트랜잭션 메서드로 처리
+            processSiteMonitoringResult(site, document, pageTitle, pageText, currentHash);
 
         } catch (IOException e) {
             log.error("사이트 크롤링 실패: {} - {}", site.getName(), e.getMessage());
+            // 크롤링 실패 시에도 lastCheckedAt 업데이트
+            updateLastCheckedTime(site.getId());
         } catch (Exception e) {
             log.error("모니터링 중 예외 발생: {} - {}", site.getName(), e.getMessage(), e);
+            // 예외 발생 시에도 lastCheckedAt 업데이트
+            updateLastCheckedTime(site.getId());
         }
     }
 
     /**
-     * JSoup을 사용하여 웹사이트 크롤링
+     * 모니터링 결과 처리 (독립적인 트랜잭션)
+     * DB 작업만 수행하여 커넥션 점유 시간 최소화
+     * REQUIRES_NEW: 부모 트랜잭션 롤백 시에도 이 트랜잭션은 커밋 보장
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    protected void processSiteMonitoringResult(Site site, Document document, String pageTitle, String pageText, String currentHash) {
+        // Site를 ID로 재조회하여 Detached 상태 방지
+        Site managedSite = siteRepository.findById(site.getId())
+                .orElseThrow(() -> new IllegalArgumentException("사이트를 찾을 수 없습니다: " + site.getId()));
+
+        // 최초 실행 여부 판단 (lastContentHash가 null이면 최초 실행)
+        boolean isFirstRun = (managedSite.getLastContentHash() == null);
+
+        boolean contentChanged = detectContentChange(managedSite, currentHash);
+
+        // 첫 실행이거나 내용이 변경된 경우 게시글 추출
+        if (isFirstRun || contentChanged) {
+            if (isFirstRun) {
+                log.info("사이트 최초 모니터링 시작 (기존 게시글은 알림 없이 저장만 수행): {}", managedSite.getName());
+            } else {
+                log.info("사이트 내용 변경 감지: {}", managedSite.getName());
+            }
+
+            // 개별 게시글 추출 시도 (articleSelector 설정 여부와 무관하게 시도)
+            boolean articlesExtracted = extractAndProcessArticles(managedSite, document, isFirstRun);
+
+            // 게시글 추출 실패 시
+            if (!articlesExtracted) {
+                // 최초 실행이 아니고 전체 페이지 변경 감지 옵션이 활성화된 경우 알림 생성
+                if (!isFirstRun && managedSite.getDetectContentChange()) {
+                    createContentChangeAlert(managedSite, pageTitle, document.location());
+                }
+
+                // 최초 실행이 아닐 때만 전체 페이지 키워드 감지
+                if (!isFirstRun) {
+                    log.info("개별 게시글 추출 실패, 전체 페이지 키워드 감지 모드로 전환: {}", managedSite.getName());
+                    detectKeywords(managedSite, pageText, pageTitle, document.location());
+                }
+            }
+        }
+
+        // 마지막 체크 시간 업데이트
+        managedSite.setLastCheckedAt(java.time.LocalDateTime.now());
+        siteRepository.save(managedSite);
+    }
+
+    /**
+     * 마지막 체크 시간만 업데이트 (독립적인 트랜잭션)
+     * REQUIRES_NEW: 크롤링 실패 시에도 lastCheckedAt은 반드시 업데이트 보장
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    protected void updateLastCheckedTime(Long siteId) {
+        siteRepository.findById(siteId).ifPresent(site -> {
+            site.setLastCheckedAt(java.time.LocalDateTime.now());
+            siteRepository.save(site);
+        });
+    }
+
+    /**
+     * JSoup을 사용하여 웹사이트 크롤링 (재시도 로직 포함)
      * @param url 크롤링할 URL
      * @return JSoup Document 객체
      * @throws IOException 크롤링 실패 시
      */
     private Document crawlWebsite(String url) throws IOException {
-        log.debug("웹사이트 크롤링: {}", url);
+        // SSRF 공격 방어를 위한 URL 검증
+        try {
+            UrlUtils.validateUrl(url);
+        } catch (IllegalArgumentException e) {
+            log.error("URL 검증 실패: {} - {}", url, e.getMessage());
+            throw new IOException("유효하지 않은 URL입니다: " + e.getMessage(), e);
+        }
 
-        // JSoup으로 웹페이지 가져오기
-        // timeout: 10초, userAgent: 일반 브라우저로 위장
-        Document document = Jsoup.connect(url)
-                .timeout(10000)
-                .userAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-                .get();
+        int attempt = 0;
+        IOException lastException = null;
 
-        log.debug("크롤링 완료: {}", url);
-        return document;
+        while (attempt < WebCrawlerConstants.MAX_RETRY_ATTEMPTS) {
+            attempt++;
+
+            try {
+                // User-Agent 랜덤 선택 (ThreadLocalRandom: thread-safe)
+                String userAgent = WebCrawlerConstants.USER_AGENTS[ThreadLocalRandom.current().nextInt(WebCrawlerConstants.USER_AGENTS.length)];
+
+                // JSoup으로 웹페이지 가져오기
+                // timeout: connection 5초, read 15초
+                Document document = Jsoup.connect(url)
+                        .timeout(WebCrawlerConstants.TIMEOUT_DEFAULT_MS)           // connection timeout: 5초
+                        .maxBodySize(0)          // 본문 크기 제한 없음
+                        .userAgent(userAgent)    // 랜덤 User-Agent
+                        .followRedirects(true)   // 리다이렉트 자동 따라가기
+                        .get();
+
+                return document;
+
+            } catch (HttpStatusException e) {
+                int statusCode = e.getStatusCode();
+                log.warn("HTTP 상태 코드 오류: {} - {}", statusCode, url);
+
+                // HTTP 상태 코드별 처리
+                switch (statusCode) {
+                    case 404:
+                        // 404는 재시도 불필요
+                        throw new IOException("페이지를 찾을 수 없습니다 (404): " + url, e);
+
+                    case 429:
+                        // Too Many Requests - 대기 시간 증가
+                        log.warn("요청 제한 (429) - 대기 후 재시도: {}", url);
+                        lastException = e;
+                        break;
+
+                    case 500:
+                    case 502:
+                    case 503:
+                        // 서버 오류 - 재시도 가능
+                        log.warn("서버 오류 ({}) - 재시도: {}", statusCode, url);
+                        lastException = e;
+                        break;
+
+                    default:
+                        // 기타 오류는 그대로 전파
+                        throw new IOException("HTTP 오류 " + statusCode + ": " + url, e);
+                }
+
+            } catch (SocketTimeoutException e) {
+                log.warn("크롤링 타임아웃 (시도 {}/{}): {} - 5초 초과",
+                        attempt, WebCrawlerConstants.MAX_RETRY_ATTEMPTS, url);
+                lastException = e;
+
+            } catch (UnknownHostException e) {
+                log.error("호스트를 찾을 수 없음: {}", url);
+                throw new IOException("호스트를 찾을 수 없습니다: " + url, e);
+
+            } catch (ConnectException e) {
+                log.warn("연결 실패 (시도 {}/{}): {} - {}",
+                        attempt, WebCrawlerConstants.MAX_RETRY_ATTEMPTS, url, e.getMessage());
+                lastException = e;
+
+            } catch (IOException e) {
+                log.warn("크롤링 실패 (시도 {}/{}): {} - {}",
+                        attempt, WebCrawlerConstants.MAX_RETRY_ATTEMPTS, url, e.getMessage());
+                lastException = e;
+            }
+
+            // 마지막 시도가 아니면 대기 후 재시도 (지수 백오프)
+            if (attempt < WebCrawlerConstants.MAX_RETRY_ATTEMPTS) {
+                long delayMs = WebCrawlerConstants.INITIAL_RETRY_DELAY_MS * (1 << (attempt - 1)); // 1초, 2초, 4초
+
+                try {
+                    Thread.sleep(delayMs);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    throw new IOException("크롤링 재시도 중 중단됨: " + url, ie);
+                }
+            }
+        }
+
+        // 모든 재시도 실패
+        log.error("크롤링 최종 실패 ({}번 시도): {}", WebCrawlerConstants.MAX_RETRY_ATTEMPTS, url);
+        throw new IOException("크롤링 최종 실패 after " + WebCrawlerConstants.MAX_RETRY_ATTEMPTS + " attempts: " + url, lastException);
     }
 
     /**
@@ -136,25 +321,7 @@ public class MonitorService {
      * @return 16진수 문자열로 변환된 해시값
      */
     private String calculateHash(String content) {
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            byte[] hashBytes = digest.digest(content.getBytes(StandardCharsets.UTF_8));
-
-            // 바이트 배열을 16진수 문자열로 변환
-            StringBuilder hexString = new StringBuilder();
-            for (byte b : hashBytes) {
-                String hex = Integer.toHexString(0xff & b);
-                if (hex.length() == 1) {
-                    hexString.append('0');
-                }
-                hexString.append(hex);
-            }
-
-            return hexString.toString();
-        } catch (NoSuchAlgorithmException e) {
-            log.error("해시 알고리즘을 찾을 수 없습니다: {}", e.getMessage());
-            return "";
-        }
+        return HashUtils.sha256(content);
     }
 
     /**
@@ -168,7 +335,6 @@ public class MonitorService {
 
         // 이전 해시값이 없으면 최초 실행
         if (previousHash == null) {
-            log.debug("최초 모니터링 - 해시값 저장: Site ID = {}, Site Name = {}", site.getId(), site.getName());
             site.setLastContentHash(currentHash);
             siteRepository.save(site);
             return false;
@@ -208,12 +374,8 @@ public class MonitorService {
         allKeywords.addAll(globalKeywords);
 
         if (allKeywords.isEmpty()) {
-            log.debug("사이트에 등록된 활성 키워드가 없습니다: {}", site.getName());
             return;
         }
-
-        log.debug("키워드 감지 시작: {} (사이트 키워드: {}, 공통 키워드: {})",
-                site.getName(), siteKeywords.size(), globalKeywords.size());
 
         // 각 키워드에 대해 검사
         for (Keyword keyword : allKeywords) {
@@ -253,18 +415,8 @@ public class MonitorService {
                 .sent(false) // 아직 전송되지 않음
                 .build();
 
-        // 데이터베이스에 저장
-        Alert savedAlert = alertRepository.save(alert);
-        log.info("알림 생성 완료: {}", message);
-
-        // SSE를 통해 모든 연결된 클라이언트에게 실시간 알림 전송
-        // 디스코드 웹훅도 자동으로 전송됨
-        try {
-            sseService.broadcastAlert(savedAlert);
-            log.info("실시간 알림 전송 완료: 알림 ID = {}", savedAlert.getId());
-        } catch (Exception e) {
-            log.error("실시간 알림 전송 실패: {}", e.getMessage(), e);
-        }
+        // 공통 로직: Alert 저장 및 브로드캐스트
+        saveAndBroadcastAlert(alert, "createAlert");
     }
 
     /**
@@ -292,18 +444,8 @@ public class MonitorService {
                 .sent(false) // 아직 전송되지 않음
                 .build();
 
-        // 데이터베이스에 저장
-        Alert savedAlert = alertRepository.save(alert);
-        log.info("내용 변경 알림 생성 완료: {}", message);
-
-        // SSE를 통해 모든 연결된 클라이언트에게 실시간 알림 전송
-        // 디스코드 웹훅도 자동으로 전송됨
-        try {
-            sseService.broadcastAlert(savedAlert);
-            log.info("실시간 알림 전송 완료: 알림 ID = {}", savedAlert.getId());
-        } catch (Exception e) {
-            log.error("실시간 알림 전송 실패: {}", e.getMessage(), e);
-        }
+        // 공통 로직: Alert 저장 및 브로드캐스트
+        saveAndBroadcastAlert(alert, "createContentChangeAlert");
     }
 
     /**
@@ -383,8 +525,9 @@ public class MonitorService {
      * 개별 게시글 추출 및 처리
      * @param site 사이트 정보
      * @param document JSoup Document
+     * @param isFirstRun 최초 실행 여부 (true일 경우 알림 생성 안 함)
      */
-    private boolean extractAndProcessArticles(Site site, Document document) {
+    private boolean extractAndProcessArticles(Site site, Document document, boolean isFirstRun) {
         try {
             // articleSelector 또는 fallback 패턴으로 게시글 링크 추출
             Elements articleLinks = tryExtractArticleLinks(site, document);
@@ -422,7 +565,9 @@ public class MonitorService {
 
                     // 신규 게시글인 경우에만 처리
                     if (!alreadyExists) {
-                        log.info("신규 게시글 발견: {} - {}", articleTitle, articleUrl);
+                        if (!isFirstRun) {
+                            log.info("신규 게시글 발견: {} - {}", articleTitle, articleUrl);
+                        }
 
                         // Article 엔티티 생성 및 저장
                         Article article = Article.builder()
@@ -433,8 +578,8 @@ public class MonitorService {
                                 .build();
                         articleRepository.save(article);
 
-                        // 키워드 확인 후 Alert 생성
-                        processArticleForKeywords(site, article, articleTitle, articleUrl);
+                        // 키워드 확인 후 Alert 생성 (최초 실행이 아닐 때만)
+                        processArticleForKeywords(site, article, articleTitle, articleUrl, isFirstRun);
 
                         newArticleCount++;
                     }
@@ -495,8 +640,14 @@ public class MonitorService {
      * @param article 게시글
      * @param articleTitle 게시글 제목
      * @param articleUrl 게시글 URL
+     * @param isFirstRun 최초 실행 여부 (true일 경우 알림 생성 안 함)
      */
-    private void processArticleForKeywords(Site site, Article article, String articleTitle, String articleUrl) {
+    private void processArticleForKeywords(Site site, Article article, String articleTitle, String articleUrl, boolean isFirstRun) {
+        // 최초 실행 시에는 알림 생성하지 않음 (Article만 저장)
+        if (isFirstRun) {
+            return;
+        }
+
         // 사이트별 키워드 조회
         List<Keyword> siteKeywords = site.getKeywords().stream()
                 .filter(Keyword::getActive)
@@ -559,16 +710,44 @@ public class MonitorService {
                 .sent(false)
                 .build();
 
-        Alert savedAlert = alertRepository.save(alert);
+        // 공통 로직: Alert 저장 및 브로드캐스트
+        Alert savedAlert = saveAndBroadcastAlert(alert, "createArticleAlert");
         log.info("게시글 Alert 생성 완료: ID = {}, 제목 = {}", savedAlert.getId(), articleTitle);
+    }
 
-        // SSE 실시간 알림 전송
+    /**
+     * Alert 저장 및 브로드캐스트 공통 로직
+     * SSE 전송, Discord 알림, 알림 정리 등의 공통 작업을 수행
+     *
+     * @param alert 저장할 Alert 엔티티
+     * @param methodName 호출한 메서드 이름 (SSE 오류 추적용)
+     * @return 저장된 Alert 엔티티
+     */
+    private Alert saveAndBroadcastAlert(Alert alert, String methodName) {
+        // 데이터베이스에 저장
+        Alert savedAlert = alertService.createAlert(alert);
+        log.info("알림 생성 완료: {}", alert.getMessage());
+
+        // SSE를 통해 모든 연결된 클라이언트에게 실시간 알림 전송
         try {
             sseService.broadcastAlert(savedAlert);
             log.info("실시간 알림 전송 완료: 알림 ID = {}", savedAlert.getId());
         } catch (Exception e) {
             log.error("실시간 알림 전송 실패: {}", e.getMessage(), e);
+            // SSE 전송 실패 이벤트 발행 (모니터링 시스템에서 추적 가능)
+            eventPublisher.publishEvent(new SseTransmissionFailureEvent(
+                    this, savedAlert.getId(), savedAlert.getMessage(),
+                    e.getMessage(), methodName
+            ));
         }
+
+        // 디스코드 웹훅 전송
+        sendDiscordNotification(savedAlert);
+
+        // 사이트별 알림 개수 제한 (최대 50개)
+        cleanupOldAlerts(alert.getSite());
+
+        return savedAlert;
     }
 
     /**
@@ -593,5 +772,49 @@ public class MonitorService {
             siteRepository.save(site);
         }
         log.info("모든 사이트 해시값 초기화: {} 개 사이트", allSites.size());
+    }
+
+    /**
+     * 사이트별 알림 개수 제한 (설정값: monitor.alert.max-per-site)
+     * 초과 시 오래된 알림부터 삭제
+     * 표준 JPA 방식 (Pageable 사용, DB 독립적)
+     * @param site 사이트 정보
+     */
+    @Transactional
+    public void cleanupOldAlerts(Site site) {
+        long alertCount = alertRepository.countBySite(site);
+
+        if (alertCount > maxAlertsPerSite) {
+            // 초과된 개수만큼 오래된 알림 조회 후 삭제 (Pageable 사용)
+            int deleteCount = (int) (alertCount - maxAlertsPerSite);
+            Pageable pageable = PageRequest.of(0, deleteCount);
+            Page<Alert> oldAlerts = alertRepository.findBySiteOrderByDetectedAtAsc(site, pageable);
+
+            if (!oldAlerts.isEmpty()) {
+                alertRepository.deleteAll(oldAlerts.getContent());
+                log.info("사이트 '{}' 알림 정리 완료: {} 개 삭제 (현재: {} -> {})",
+                        site.getName(), oldAlerts.getContent().size(), alertCount, maxAlertsPerSite);
+            }
+        }
+    }
+
+    /**
+     * 디스코드 웹훅으로 알림 전송
+     * @param alert 전송할 알림
+     */
+    private void sendDiscordNotification(Alert alert) {
+        try {
+            List<Setting> settings = settingRepository.findAll();
+            if (!settings.isEmpty()) {
+                Setting setting = settings.get(0);
+
+                // 알림이 활성화되어 있고 웹훅 URL이 설정되어 있으면 전송
+                if (setting.getEnabled() && setting.getDiscordWebhookUrl() != null && !setting.getDiscordWebhookUrl().trim().isEmpty()) {
+                    discordService.sendAlert(setting.getDiscordWebhookUrl(), alert);
+                }
+            }
+        } catch (Exception e) {
+            log.error("디스코드 알림 전송 중 오류 발생: {}", e.getMessage(), e);
+        }
     }
 }

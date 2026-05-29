@@ -3,6 +3,8 @@ package com.webmonitor.service;
 import com.webmonitor.domain.Alert;
 import com.webmonitor.domain.Keyword;
 import com.webmonitor.domain.Site;
+import com.webmonitor.dto.SiteRequest;
+import com.webmonitor.dto.SiteResponse;
 import com.webmonitor.repository.AlertRepository;
 import com.webmonitor.repository.KeywordRepository;
 import com.webmonitor.repository.SiteRepository;
@@ -48,7 +50,6 @@ class SiteServiceTest {
         testSite = Site.builder()
                 .name("테스트 사이트")
                 .url("https://test.com")
-                .checkInterval(10)
                 .active(true)
                 .detectContentChange(false)
                 .build();
@@ -172,21 +173,21 @@ class SiteServiceTest {
     @DisplayName("사이트 생성 - 정상 케이스")
     void createSite_Success() {
         // Given
-        Site newSite = Site.builder()
+        SiteRequest request = SiteRequest.builder()
                 .name("새 사이트")
                 .url("https://new-site.com")
-                .checkInterval(5)
                 .active(true)
-                .detectContentChange(true)
                 .build();
 
         // When
-        Site createdSite = siteService.createSite(newSite);
+        SiteResponse createdSite = siteService.createSite(request);
 
         // Then
         assertThat(createdSite).isNotNull();
         assertThat(createdSite.getId()).isNotNull();
         assertThat(createdSite.getName()).isEqualTo("새 사이트");
+        assertThat(createdSite.getUrl()).isEqualTo("https://new-site.com");
+        assertThat(createdSite.getActive()).isTrue();
         assertThat(siteRepository.count()).isEqualTo(2); // 기존 1개 + 새로 추가 1개
     }
 
@@ -194,21 +195,18 @@ class SiteServiceTest {
     @DisplayName("사이트 수정 - 정상 케이스")
     void updateSite_Success() {
         // Given
-        Site updateData = Site.builder()
+        SiteRequest request = SiteRequest.builder()
                 .name("수정된 사이트")
                 .url("https://updated.com")
-                .checkInterval(15)
                 .active(false)
-                .detectContentChange(true)
                 .build();
 
         // When
-        Site updatedSite = siteService.updateSite(testSite.getId(), updateData);
+        SiteResponse updatedSite = siteService.updateSite(testSite.getId(), request);
 
         // Then
         assertThat(updatedSite.getName()).isEqualTo("수정된 사이트");
         assertThat(updatedSite.getUrl()).isEqualTo("https://updated.com");
-        assertThat(updatedSite.getCheckInterval()).isEqualTo(15);
         assertThat(updatedSite.getActive()).isFalse();
     }
 
@@ -217,15 +215,14 @@ class SiteServiceTest {
     void updateSite_NotFound() {
         // Given
         Long nonExistentId = 99999L;
-        Site updateData = Site.builder()
+        SiteRequest request = SiteRequest.builder()
                 .name("수정할 데이터")
                 .url("https://test.com")
-                .checkInterval(10)
                 .active(true)
                 .build();
 
         // When & Then
-        assertThatThrownBy(() -> siteService.updateSite(nonExistentId, updateData))
+        assertThatThrownBy(() -> siteService.updateSite(nonExistentId, request))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("사이트를 찾을 수 없습니다");
     }
@@ -237,7 +234,7 @@ class SiteServiceTest {
         boolean initialActive = testSite.getActive();
 
         // When
-        Site toggledSite = siteService.toggleSiteActive(testSite.getId());
+        SiteResponse toggledSite = siteService.toggleSiteActive(testSite.getId());
 
         // Then
         assertThat(toggledSite.getActive()).isEqualTo(!initialActive);
