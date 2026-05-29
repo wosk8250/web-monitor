@@ -165,26 +165,22 @@ public class KeywordService {
     }
 
     /**
-     * 특정 사이트의 키워드 조회
+     * 특정 사이트의 키워드 조회 (최적화됨 - DB에서 직접 필터링)
      * @param siteId 사이트 ID
      * @return 해당 사이트의 키워드 목록
      */
     public List<Keyword> getKeywordsBySite(Long siteId) {
         log.debug("사이트별 키워드 조회: siteId = {}", siteId);
-        return keywordRepository.findAll().stream()
-                .filter(keyword -> keyword.getSite() != null && keyword.getSite().getId().equals(siteId))
-                .toList();
+        return keywordRepository.findBySiteId(siteId);
     }
 
     /**
-     * 전체 공통 키워드 조회
+     * 전체 공통 키워드 조회 (최적화됨 - DB에서 직접 필터링)
      * @return 전체 공통 키워드 목록
      */
     public List<Keyword> getGlobalKeywords() {
         log.debug("전체 공통 키워드 조회");
-        return keywordRepository.findAll().stream()
-                .filter(keyword -> keyword.getSite() == null)
-                .toList();
+        return keywordRepository.findBySiteIsNull();
     }
 
     /**

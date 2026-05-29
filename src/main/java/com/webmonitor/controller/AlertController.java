@@ -3,6 +3,8 @@ package com.webmonitor.controller;
 import com.webmonitor.domain.Alert;
 import com.webmonitor.dto.AlertResponse;
 import com.webmonitor.repository.AlertRepository;
+import com.webmonitor.service.AlertService;
+import io.github.resilience4j.ratelimiter.annotation.RateLimiter;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.format.annotation.DateTimeFormat;
@@ -16,14 +18,17 @@ import java.util.stream.Collectors;
 
 /**
  * 알림 관리 REST API 컨트롤러
+ * Rate Limiter 적용: API 과부하 방지 (10초당 최대 100 요청)
  */
 @RestController // REST API 컨트롤러로 지정 (@Controller + @ResponseBody)
 @RequestMapping("/api/alerts") // 기본 URL 경로 설정
 @RequiredArgsConstructor // final 필드에 대한 생성자 자동 생성 (의존성 주입)
 @Slf4j // 로그 사용을 위한 Logger 자동 생성
+@RateLimiter(name = "api")
 public class AlertController {
 
     private final AlertRepository alertRepository;
+    private final AlertService alertService;
 
     /**
      * 모든 알림 조회
@@ -33,7 +38,7 @@ public class AlertController {
     @GetMapping
     public ResponseEntity<List<AlertResponse>> getAllAlerts() {
         log.info("GET /api/alerts - 모든 알림 조회 요청");
-        List<AlertResponse> alerts = alertRepository.findAll().stream()
+        List<AlertResponse> alerts = alertRepository.findAllByOrderByDetectedAtDesc().stream()
                 .map(AlertResponse::from)
                 .collect(Collectors.toList());
         return ResponseEntity.ok(alerts);
@@ -62,7 +67,7 @@ public class AlertController {
     @GetMapping("/unsent")
     public ResponseEntity<List<AlertResponse>> getUnsentAlerts() {
         log.info("GET /api/alerts/unsent - 미전송 알림 조회 요청");
-        List<AlertResponse> alerts = alertRepository.findBySent(false).stream()
+        List<AlertResponse> alerts = alertRepository.findBySentOrderByDetectedAtDesc(false).stream()
                 .map(AlertResponse::from)
                 .collect(Collectors.toList());
         return ResponseEntity.ok(alerts);
@@ -76,14 +81,14 @@ public class AlertController {
     @GetMapping("/sent")
     public ResponseEntity<List<AlertResponse>> getSentAlerts() {
         log.info("GET /api/alerts/sent - 전송 완료 알림 조회 요청");
-        List<AlertResponse> alerts = alertRepository.findBySent(true).stream()
+        List<AlertResponse> alerts = alertRepository.findBySentOrderByDetectedAtDesc(true).stream()
                 .map(AlertResponse::from)
                 .collect(Collectors.toList());
         return ResponseEntity.ok(alerts);
     }
 
     /**
-     * 특정 사이트의 알림 조회
+     * 특정 사이트의 알림 조회 (N+1 쿼리 최적화)
      * GET /api/alerts/site/{siteId}
      * @param siteId 사이트 ID
      * @return 해당 사이트의 알림 목록
@@ -91,15 +96,14 @@ public class AlertController {
     @GetMapping("/site/{siteId}")
     public ResponseEntity<List<AlertResponse>> getAlertsBySite(@PathVariable Long siteId) {
         log.info("GET /api/alerts/site/{} - 사이트별 알림 조회 요청", siteId);
-        List<AlertResponse> alerts = alertRepository.findAll().stream()
-                .filter(alert -> alert.getSite().getId().equals(siteId))
+        List<AlertResponse> alerts = alertRepository.findBySiteIdOrderByDetectedAtDesc(siteId).stream()
                 .map(AlertResponse::from)
                 .collect(Collectors.toList());
         return ResponseEntity.ok(alerts);
     }
 
     /**
-     * 특정 키워드의 알림 조회
+     * 특정 키워드의 알림 조회 (N+1 쿼리 최적화)
      * GET /api/alerts/keyword/{keywordId}
      * @param keywordId 키워드 ID
      * @return 해당 키워드의 알림 목록
@@ -107,8 +111,7 @@ public class AlertController {
     @GetMapping("/keyword/{keywordId}")
     public ResponseEntity<List<AlertResponse>> getAlertsByKeyword(@PathVariable Long keywordId) {
         log.info("GET /api/alerts/keyword/{} - 키워드별 알림 조회 요청", keywordId);
-        List<AlertResponse> alerts = alertRepository.findAll().stream()
-                .filter(alert -> alert.getKeyword() != null && alert.getKeyword().getId().equals(keywordId))
+        List<AlertResponse> alerts = alertRepository.findByKeywordIdOrderByDetectedAtDesc(keywordId).stream()
                 .map(AlertResponse::from)
                 .collect(Collectors.toList());
         return ResponseEntity.ok(alerts);
@@ -216,10 +219,7 @@ public class AlertController {
         log.info("DELETE /api/alerts/sent - 읽은 알림 전체 삭제 요청");
 
         try {
-            List<Alert> sentAlerts = alertRepository.findBySent(true);
-            int deletedCount = sentAlerts.size();
-            alertRepository.deleteAll(sentAlerts);
-
+            int deletedCount = alertService.deleteSentAlerts();
             log.info("읽은 알림 전체 삭제 완료: {} 건", deletedCount);
             return ResponseEntity.ok(deletedCount + "건의 알림이 삭제되었습니다.");
         } catch (Exception e) {
@@ -239,10 +239,7 @@ public class AlertController {
         log.info("DELETE /api/alerts/all - 모든 알림 삭제 요청");
 
         try {
-            List<Alert> allAlerts = alertRepository.findAll();
-            int deletedCount = allAlerts.size();
-            alertRepository.deleteAll(allAlerts);
-
+            int deletedCount = alertService.deleteAllAlerts();
             log.info("모든 알림 삭제 완료: {} 건", deletedCount);
             return ResponseEntity.ok(deletedCount + "건의 알림이 삭제되었습니다.");
         } catch (Exception e) {

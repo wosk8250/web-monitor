@@ -34,11 +34,6 @@ public class SiteResponse {
     private String url;
 
     /**
-     * 체크 주기 (분 단위)
-     */
-    private Integer checkInterval;
-
-    /**
      * 활성화 여부
      */
     private Boolean active;
@@ -68,7 +63,6 @@ public class SiteResponse {
                 .id(site.getId())
                 .name(site.getName())
                 .url(site.getUrl())
-                .checkInterval(site.getCheckInterval())
                 .active(site.getActive())
                 .createdAt(site.getCreatedAt())
                 .updatedAt(site.getUpdatedAt())

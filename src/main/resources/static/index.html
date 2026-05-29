@@ -78,7 +78,10 @@
     <!-- 탭 메뉴 -->
     <div class="container mx-auto px-4 mt-6">
         <div class="flex space-x-2 border-b border-slate-700">
-            <button onclick="switchTab('sites')" id="tab-sites" class="tab-button px-6 py-3 rounded-t-lg active">
+            <button onclick="switchTab('dashboard')" id="tab-dashboard" class="tab-button px-6 py-3 rounded-t-lg active">
+                📊 대시보드
+            </button>
+            <button onclick="switchTab('sites')" id="tab-sites" class="tab-button px-6 py-3 rounded-t-lg">
                 사이트 관리
             </button>
             <button onclick="switchTab('alerts')" id="tab-alerts" class="tab-button px-6 py-3 rounded-t-lg">
@@ -92,8 +95,73 @@
 
     <!-- 메인 컨텐츠 -->
     <div class="container mx-auto px-4 py-6">
+        <!-- 대시보드 탭 -->
+        <div id="content-dashboard" class="tab-content">
+            <!-- 통계 카드 -->
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
+                <!-- 전체 사이트 수 -->
+                <div class="bg-slate-800 rounded-lg shadow-lg p-6">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <p class="text-sm text-gray-400 mb-1">전체 사이트</p>
+                            <p id="stat-total-sites" class="text-3xl font-bold text-blue-400">-</p>
+                        </div>
+                        <div class="text-4xl">🌐</div>
+                    </div>
+                </div>
+
+                <!-- 활성 사이트 수 -->
+                <div class="bg-slate-800 rounded-lg shadow-lg p-6">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <p class="text-sm text-gray-400 mb-1">활성 사이트</p>
+                            <p id="stat-active-sites" class="text-3xl font-bold text-green-400">-</p>
+                        </div>
+                        <div class="text-4xl">✅</div>
+                    </div>
+                </div>
+
+                <!-- 전체 알림 수 -->
+                <div class="bg-slate-800 rounded-lg shadow-lg p-6">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <p class="text-sm text-gray-400 mb-1">전체 알림</p>
+                            <p id="stat-total-alerts" class="text-3xl font-bold text-purple-400">-</p>
+                        </div>
+                        <div class="text-4xl">📢</div>
+                    </div>
+                </div>
+
+                <!-- 오늘 알림 수 -->
+                <div class="bg-slate-800 rounded-lg shadow-lg p-6">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <p class="text-sm text-gray-400 mb-1">오늘 알림</p>
+                            <p id="stat-today-alerts" class="text-3xl font-bold text-orange-400">-</p>
+                        </div>
+                        <div class="text-4xl">🔔</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 최근 알림 -->
+            <div class="bg-slate-800 rounded-lg shadow-lg p-6">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-xl font-bold text-blue-400">최근 알림</h2>
+                    <button onclick="switchTab('alerts')" class="px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg text-sm">
+                        전체 보기 →
+                    </button>
+                </div>
+                <div id="dashboard-recent-alerts" class="space-y-3">
+                    <div class="text-center py-8 text-gray-500">
+                        로딩 중...
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- 사이트 관리 탭 -->
-        <div id="content-sites" class="tab-content">
+        <div id="content-sites" class="tab-content hidden">
             <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 <!-- 사이트 등록 폼 -->
                 <div class="lg:col-span-1">
@@ -209,12 +277,6 @@
                             <p class="text-xs text-gray-400 mt-1">디스코드 서버 설정에서 웹훅 URL을 생성하여 입력하세요.</p>
                         </div>
                         <div class="mb-6">
-                            <label class="block text-sm font-medium mb-2">알림 제목</label>
-                            <input type="text" id="notificationTitle"
-                                class="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                                placeholder="웹 모니터링 알림">
-                        </div>
-                        <div class="mb-6">
                             <label class="flex items-center space-x-3">
                                 <input type="checkbox" id="settingsEnabled"
                                     class="w-5 h-5 bg-slate-700 border-slate-600 rounded focus:ring-2 focus:ring-blue-500">
@@ -273,7 +335,7 @@
 
     <!-- 사이트 수정 모달 -->
     <div id="editSiteModal" class="modal">
-        <div class="bg-slate-800 rounded-lg shadow-xl p-6 w-full max-w-2xl mx-4">
+        <div class="bg-slate-800 rounded-lg shadow-xl p-6 w-full max-w-2xl mx-4 max-h-[90vh] overflow-y-auto">
             <div class="flex justify-between items-center mb-4">
                 <h3 class="text-xl font-bold text-purple-400">사이트 수정</h3>
                 <button onclick="closeEditSiteModal()" class="text-gray-400 hover:text-white">
@@ -311,9 +373,32 @@
                     <p class="text-xs text-slate-400 mt-1">개별 게시글 링크를 찾을 CSS 선택자. 비우면 자동으로 일반적인 패턴을 시도합니다.</p>
                 </div>
 
+                <div class="border-t border-slate-700 pt-4 mb-4">
+                    <h4 class="text-sm font-medium mb-3 text-blue-400">키워드 관리</h4>
+
+                    <div class="mb-4">
+                        <label class="block text-sm font-medium mb-2">현재 키워드</label>
+                        <div id="editCurrentKeywords" class="min-h-[60px] p-3 bg-slate-700 rounded-lg">
+                            <p class="text-sm text-gray-400">로딩 중...</p>
+                        </div>
+                    </div>
+
+                    <div class="mb-4">
+                        <label class="block text-sm font-medium mb-2">새 키워드 추가</label>
+                        <div class="flex space-x-2">
+                            <input type="text" id="editNewKeywordInput" placeholder="긴급,공지,중요 (쉼표로 구분)"
+                                class="flex-1 px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+                            <button type="button" onclick="addKeywordsFromEditModal()" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg text-sm font-medium transition">
+                                추가
+                            </button>
+                        </div>
+                        <p class="text-xs text-slate-400 mt-1">키워드가 없으면 새글 알림 모드로 작동합니다.</p>
+                    </div>
+                </div>
+
                 <div class="flex space-x-2">
                     <button type="submit" class="flex-1 bg-purple-600 hover:bg-purple-700 px-4 py-2 rounded-lg font-medium transition">
-                        수정
+                        사이트 정보 저장
                     </button>
                     <button type="button" onclick="closeEditSiteModal()" class="flex-1 bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded-lg font-medium transition">
                         취소
@@ -334,6 +419,7 @@
 
         // 페이지 로드 시 초기화
         document.addEventListener('DOMContentLoaded', function() {
+            loadDashboard(); // 대시보드 로드
             loadSites();
             loadSitesForFilter(); // 사이트 필터 드롭다운 초기화
             loadAlerts();
@@ -341,6 +427,79 @@
             connectSSE();
             runTests(); // 테스트 실행
         });
+
+        // 대시보드 로드
+        async function loadDashboard() {
+            try {
+                const response = await fetch('/api/stats');
+                const stats = await response.json();
+
+                // 통계 카드 업데이트
+                document.getElementById('stat-total-sites').textContent = stats.totalSites;
+                document.getElementById('stat-active-sites').textContent = stats.activeSites;
+                document.getElementById('stat-total-alerts').textContent = stats.totalAlerts;
+                document.getElementById('stat-today-alerts').textContent = stats.todayAlerts;
+
+                // 최근 알림 표시
+                const recentAlertsContainer = document.getElementById('dashboard-recent-alerts');
+                if (stats.recentAlerts.length === 0) {
+                    recentAlertsContainer.innerHTML = '<div class="text-center py-8 text-gray-500">최근 알림이 없습니다.</div>';
+                    return;
+                }
+
+                recentAlertsContainer.innerHTML = stats.recentAlerts.map(alert => `
+                    <div class="bg-slate-700 rounded-lg p-4 ${!alert.sent ? 'border-l-4 border-blue-500' : ''}">
+                        <div class="flex justify-between items-start">
+                            <div class="flex-1">
+                                <div class="flex items-center space-x-2 mb-2">
+                                    <span class="px-2 py-1 bg-blue-900 text-blue-300 rounded text-xs">${alert.siteName}</span>
+                                    ${alert.keywordText ? `<span class="px-2 py-1 bg-purple-900 text-purple-300 rounded text-xs">${alert.keywordText}</span>` : '<span class="px-2 py-1 bg-purple-900 text-purple-300 rounded text-xs">페이지 변경</span>'}
+                                    ${!alert.sent ? '<span class="px-2 py-1 bg-red-900 text-red-300 rounded text-xs">새 알림</span>' : ''}
+                                </div>
+                                <a href="#" onclick="markAlertAsReadAndOpen(${alert.id}, '${alert.detectedUrl}', ${alert.sent}); return false;" class="block text-base font-semibold mb-2 text-blue-400 hover:text-blue-300 hover:underline">${alert.message}</a>
+                                <p class="text-xs text-gray-400">
+                                    ${formatRelativeTime(new Date(alert.detectedAt))}
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                `).join('');
+
+                console.log('대시보드 로드 완료:', stats);
+            } catch (error) {
+                console.error('대시보드 로드 실패:', error);
+                showToast('대시보드 로드 실패', 'error');
+            }
+        }
+
+        // 상대 시간 표시 함수
+        function formatRelativeTime(date) {
+            const now = new Date();
+            const diffMs = now - date;
+            const diffSeconds = Math.floor(diffMs / 1000);
+            const diffMinutes = Math.floor(diffSeconds / 60);
+            const diffHours = Math.floor(diffMinutes / 60);
+            const diffDays = Math.floor(diffHours / 24);
+
+            if (diffSeconds < 60) {
+                return '방금 전';
+            } else if (diffMinutes < 60) {
+                return `${diffMinutes}분 전`;
+            } else if (diffHours < 24) {
+                return `${diffHours}시간 전`;
+            } else if (diffDays < 7) {
+                return `${diffDays}일 전`;
+            } else {
+                // 7일 이상이면 날짜 표시
+                return date.toLocaleDateString('ko-KR', {
+                    year: 'numeric',
+                    month: '2-digit',
+                    day: '2-digit',
+                    hour: '2-digit',
+                    minute: '2-digit'
+                });
+            }
+        }
 
         // SSE 연결
         function connectSSE() {
@@ -438,9 +597,6 @@
                         <td class="py-3 px-4 text-center space-x-1">
                             <button onclick="openEditSiteModal(${site.id})" class="px-3 py-1 bg-purple-900 text-purple-300 rounded text-xs hover:bg-purple-800">
                                 수정
-                            </button>
-                            <button onclick="openKeywordModal(${site.id})" class="px-3 py-1 bg-blue-900 text-blue-300 rounded text-xs hover:bg-blue-800">
-                                키워드
                             </button>
                             <button onclick="deleteSite(${site.id})" class="px-3 py-1 bg-red-900 text-red-300 rounded text-xs hover:bg-red-800">
                                 삭제
@@ -660,6 +816,11 @@
                     document.getElementById('editSiteUrl').value = site.url;
                     document.getElementById('editSiteCheckInterval').value = site.checkInterval;
                     document.getElementById('editSiteArticleSelector').value = site.articleSelector || '';
+                    document.getElementById('editNewKeywordInput').value = '';
+
+                    // 현재 키워드 로드
+                    currentSiteId = siteId;
+                    await loadKeywordsInEditModal(siteId);
 
                     // 모달 열기
                     document.getElementById('editSiteModal').classList.add('active');
@@ -669,6 +830,79 @@
             } catch (error) {
                 console.error('사이트 정보 로드 실패:', error);
                 showToast('사이트 정보 로드 실패', 'error');
+            }
+        }
+
+        // 수정 모달에서 키워드 로드
+        async function loadKeywordsInEditModal(siteId) {
+            try {
+                const response = await fetch(`/api/keywords/site/${siteId}`);
+                const keywords = await response.json();
+
+                const container = document.getElementById('editCurrentKeywords');
+                if (keywords.length === 0) {
+                    container.innerHTML = '<p class="text-sm text-gray-400">등록된 키워드가 없습니다. (새글 알림 모드)</p>';
+                } else {
+                    container.innerHTML = keywords.map(k => `
+                        <span class="inline-flex items-center keyword-tag mb-1">
+                            ${k.keyword}
+                            <button onclick="deleteKeywordFromEditModal(${k.id})" class="ml-2 text-red-300 hover:text-red-200">×</button>
+                        </span>
+                    `).join(' ');
+                }
+            } catch (error) {
+                console.error('키워드 로드 실패:', error);
+            }
+        }
+
+        // 수정 모달에서 키워드 삭제
+        async function deleteKeywordFromEditModal(keywordId) {
+            try {
+                const response = await fetch(`/api/keywords/${keywordId}`, {
+                    method: 'DELETE'
+                });
+
+                if (response.ok) {
+                    await loadKeywordsInEditModal(currentSiteId);
+                    showToast('키워드가 삭제되었습니다.', 'success');
+                } else {
+                    showToast('키워드 삭제 실패', 'error');
+                }
+            } catch (error) {
+                console.error('키워드 삭제 실패:', error);
+                showToast('키워드 삭제 실패', 'error');
+            }
+        }
+
+        // 수정 모달에서 키워드 추가
+        async function addKeywordsFromEditModal() {
+            const newKeywordsInput = document.getElementById('editNewKeywordInput').value.trim();
+            if (!newKeywordsInput) {
+                showToast('키워드를 입력해주세요.', 'error');
+                return;
+            }
+
+            const keywords = newKeywordsInput.split(',').map(k => k.trim()).filter(k => k);
+
+            try {
+                for (let keyword of keywords) {
+                    await fetch('/api/keywords', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            keyword: keyword,
+                            siteId: currentSiteId,
+                            active: true
+                        })
+                    });
+                }
+
+                showToast(`${keywords.length}개의 키워드가 추가되었습니다.`, 'success');
+                await loadKeywordsInEditModal(currentSiteId);
+                document.getElementById('editNewKeywordInput').value = '';
+            } catch (error) {
+                console.error('키워드 추가 실패:', error);
+                showToast('키워드 추가 실패', 'error');
             }
         }
 
@@ -710,6 +944,7 @@
         function closeEditSiteModal() {
             document.getElementById('editSiteModal').classList.remove('active');
             document.getElementById('editSiteForm').reset();
+            currentSiteId = null;
             loadSites();
         }
 
@@ -740,10 +975,9 @@
                                     ${alert.keywordText ? `<span class="px-2 py-1 bg-purple-900 text-purple-300 rounded text-xs">${alert.keywordText}</span>` : '<span class="px-2 py-1 bg-purple-900 text-purple-300 rounded text-xs">페이지 변경</span>'}
                                     ${!alert.sent ? '<span class="px-2 py-1 bg-red-900 text-red-300 rounded text-xs">새 알림</span>' : ''}
                                 </div>
-                                ${alert.pageTitle ? `<a href="#" onclick="markAlertAsReadAndOpen(${alert.id}, '${alert.detectedUrl}', ${alert.sent}); return false;" class="block text-base font-semibold mb-2 text-blue-400 hover:text-blue-300 hover:underline">새 글 알림 - ${alert.pageTitle}</a>` : `<a href="#" onclick="markAlertAsReadAndOpen(${alert.id}, '${alert.detectedUrl}', ${alert.sent}); return false;" class="block text-base font-semibold mb-2 text-blue-400 hover:text-blue-300 hover:underline">새 글 알림 - 제목 없음</a>`}
-                                <p class="text-sm mb-2">${alert.message}</p>
+                                <a href="#" onclick="markAlertAsReadAndOpen(${alert.id}, '${alert.detectedUrl}', ${alert.sent}); return false;" class="block text-base font-semibold mb-2 text-blue-400 hover:text-blue-300 hover:underline">${alert.message}</a>
                                 <p class="text-xs text-gray-400">
-                                    ${new Date(alert.detectedAt).toLocaleString()}
+                                    ${formatRelativeTime(new Date(alert.detectedAt))} · ${new Date(alert.detectedAt).toLocaleString()}
                                 </p>
                             </div>
                             <div class="flex flex-col space-y-2 ml-4">
@@ -900,7 +1134,6 @@
                 if (settings.length > 0) {
                     const setting = settings[0];
                     document.getElementById('discordWebhookUrl').value = setting.discordWebhookUrl || '';
-                    document.getElementById('notificationTitle').value = setting.notificationTitle || '';
                     document.getElementById('settingsEnabled').checked = setting.enabled;
                 }
             } catch (error) {
@@ -914,7 +1147,6 @@
 
             const setting = {
                 discordWebhookUrl: document.getElementById('discordWebhookUrl').value,
-                notificationTitle: document.getElementById('notificationTitle').value,
                 enabled: document.getElementById('settingsEnabled').checked
             };
 

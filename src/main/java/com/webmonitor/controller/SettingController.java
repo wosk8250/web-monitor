@@ -2,6 +2,7 @@ package com.webmonitor.controller;
 
 import com.webmonitor.domain.Setting;
 import com.webmonitor.repository.SettingRepository;
+import io.github.resilience4j.ratelimiter.annotation.RateLimiter;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
@@ -12,11 +13,13 @@ import java.util.List;
 
 /**
  * 시스템 설정 REST API 컨트롤러
+ * Rate Limiter 적용: API 과부하 방지 (10초당 최대 100 요청)
  */
 @RestController // REST API 컨트롤러로 지정 (@Controller + @ResponseBody)
 @RequestMapping("/api/settings") // 기본 URL 경로 설정
 @RequiredArgsConstructor // final 필드에 대한 생성자 자동 생성 (의존성 주입)
 @Slf4j // 로그 사용을 위한 Logger 자동 생성
+@RateLimiter(name = "api")
 public class SettingController {
 
     private final SettingRepository settingRepository;
@@ -93,7 +96,6 @@ public class SettingController {
                     .map(setting -> {
                         setting.setDiscordWebhookUrl(updatedSetting.getDiscordWebhookUrl());
                         setting.setEnabled(updatedSetting.getEnabled());
-                        setting.setNotificationTitle(updatedSetting.getNotificationTitle());
                         Setting saved = settingRepository.save(setting);
                         return ResponseEntity.ok(saved);
                     })

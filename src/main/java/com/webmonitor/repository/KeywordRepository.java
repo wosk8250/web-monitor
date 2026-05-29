@@ -2,6 +2,7 @@ package com.webmonitor.repository;
 
 import com.webmonitor.domain.Keyword;
 import com.webmonitor.domain.Site;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 
@@ -48,4 +49,19 @@ public interface KeywordRepository extends JpaRepository<Keyword, Long> {
      * @param siteId 사이트 ID
      */
     void deleteBySiteId(Long siteId);
+
+    /**
+     * 특정 사이트 ID의 키워드 조회 (N+1 쿼리 방지)
+     * @param siteId 사이트 ID
+     * @return 해당 사이트의 키워드 목록
+     */
+    List<Keyword> findBySiteId(Long siteId);
+
+    /**
+     * 전체 공통 키워드 조회 (site가 null인 키워드)
+     * N+1 쿼리 방지를 위해 Caffeine 캐시 적용 (10분 TTL)
+     * @return 전체 공통 키워드 목록
+     */
+    @Cacheable(value = "globalKeywords")
+    List<Keyword> findBySiteIsNull();
 }

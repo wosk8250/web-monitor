@@ -26,10 +26,10 @@ public class MonitorScheduler {
     /**
      * 1분마다 활성화된 사이트들을 자동으로 체크
      * cron 표현식: "초 분 시 일 월 요일"
-     * fixedDelay: 이전 작업 완료 후 지정된 시간(밀리초) 후 실행
+     * fixedDelay: 이전 작업 완료 후 지정된 시간(밀리초) 후 실행 (중복 실행 방지)
      * fixedRate: 지정된 주기(밀리초)마다 실행 (이전 작업 완료 여부와 무관)
      */
-    @Scheduled(fixedRate = 60000) // 60000ms = 60초 = 1분마다 실행
+    @Scheduled(fixedDelay = 60000) // 이전 작업 완료 후 60초(1분) 대기
     public void monitorSitesEveryMinute() {
         String currentTime = LocalDateTime.now().format(DATE_TIME_FORMATTER);
         log.info("========================================");

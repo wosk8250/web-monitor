@@ -1,0 +1,61 @@
+version: '3.8'
+
+services:
+  web-monitor:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: web-monitor-app
+    ports:
+      - "8080:8080"
+    environment:
+      # Spring Profile
+      - SPRING_PROFILES_ACTIVE=prod
+
+      # Database Configuration
+      - SPRING_DATASOURCE_URL=jdbc:h2:file:/app/data/monitor;AUTO_SERVER=TRUE
+
+      # Discord Configuration (환경 변수로 설정)
+      - DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN:-}
+      - DISCORD_BOT_ENABLED=${DISCORD_BOT_ENABLED:-false}
+
+      # API Security (운영 환경에서는 반드시 설정)
+      - API_SECURITY_ENABLED=${API_SECURITY_ENABLED:-true}
+      - API_KEY=${API_KEY:-changeme}
+
+      # Monitoring Configuration
+      - MONITOR_RATE_LIMIT_MIN_DELAY_MS=2000
+      - MONITOR_RATE_LIMIT_MAX_DELAY_MS=5000
+      - MONITOR_FAILURE_ALERT_THRESHOLD=5
+      - MONITOR_RESTOCK_ALERT_COOLDOWN_MINUTES=60
+
+      # Alert Cleanup
+      - ALERT_CLEANUP_ENABLED=true
+      - ALERT_CLEANUP_DAYS=30
+
+    volumes:
+      # Persist H2 database
+      - ./data:/app/data
+
+    restart: unless-stopped
+
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/actuator/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 40s
+
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+volumes:
+  monitor-data:
+    driver: local

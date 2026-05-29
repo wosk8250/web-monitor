@@ -45,7 +45,6 @@ class KeywordControllerTest {
         testSite = Site.builder()
                 .name("테스트 사이트")
                 .url("https://test.com")
-                .checkInterval(10)
                 .active(true)
                 .detectContentChange(false)
                 .build();

@@ -1,7 +1,9 @@
 package com.webmonitor.domain;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.webmonitor.validation.ValidationMessages;
 import jakarta.persistence.*;
+import jakarta.validation.constraints.*;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
 
@@ -23,6 +25,8 @@ public class Keyword {
     @GeneratedValue(strategy = GenerationType.IDENTITY) // 자동 증가 전략 (DB에서 자동으로 ID 생성)
     private Long id;
 
+    @NotBlank(message = ValidationMessages.KEYWORD_REQUIRED)
+    @Size(min = 1, max = 100, message = ValidationMessages.KEYWORD_LENGTH)
     @Column(nullable = false, length = 100) // null 불가, 최대 길이 100자
     private String keyword; // 감시할 키워드
 
@@ -31,6 +35,7 @@ public class Keyword {
     @JsonIgnore // JSON 직렬화 시 무한 순환 참조 방지
     private Site site; // 키워드가 속한 사이트 (null이면 전체 사이트 공통 키워드)
 
+    @NotNull(message = ValidationMessages.COMMON_NOT_NULL)
     @Column(nullable = false) // null 불가
     private Boolean active = true; // 활성화 여부 (기본값: true)
 

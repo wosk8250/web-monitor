@@ -247,6 +247,102 @@ spring.jpa.show-sql=true
 
 # H2 콘솔 활성화
 spring.h2.console.enabled=true
+
+# API 보안 (선택사항)
+api.security.enabled=true
+api.security.key=$2a$10$...bcrypt-hash...
+```
+
+## 🔒 API 보안 설정 (선택사항)
+
+이 프로젝트는 API 엔드포인트 보호를 위한 API 키 인증을 지원합니다.
+
+### API 키 활성화
+
+`application.properties`에 다음 설정을 추가하세요:
+
+```properties
+# API 보안 활성화 (기본값: false)
+api.security.enabled=true
+
+# API 키 (BCrypt 해시값)
+api.security.key=$2a$10$YourBCryptHashHere
+```
+
+### BCrypt 해시 생성 방법
+
+API 키는 반드시 **BCrypt 해시 형식**으로 저장해야 합니다. 평문 API 키는 보안상 위험합니다.
+
+#### 방법 1: 온라인 BCrypt 생성기 사용
+1. https://bcrypt-generator.com/ 접속
+2. 원하는 API 키 입력 (예: `my-secret-api-key-2024`)
+3. Rounds는 **10**으로 설정 (권장)
+4. Generate Hash 클릭
+5. 생성된 해시값을 `api.security.key`에 복사
+
+#### 방법 2: Java 코드로 생성
+```java
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+
+public class BCryptGenerator {
+    public static void main(String[] args) {
+        BCryptPasswordEncoder encoder = new BCryptPasswordEncoder(10);
+        String apiKey = "my-secret-api-key-2024";
+        String hash = encoder.encode(apiKey);
+        System.out.println("BCrypt Hash: " + hash);
+    }
+}
+```
+
+#### 방법 3: 커맨드라인 (htpasswd 사용)
+```bash
+htpasswd -bnBC 10 "" my-secret-api-key-2024 | tr -d ':\n'
+```
+
+### API 호출 시 인증
+
+API 보안이 활성화된 경우, `/api/**` 경로의 모든 요청은 `X-API-Key` 헤더에 **평문 API 키**를 포함해야 합니다.
+
+```bash
+# curl 예시
+curl -H "X-API-Key: my-secret-api-key-2024" http://localhost:8080/api/sites
+
+# fetch API 예시
+fetch('http://localhost:8080/api/sites', {
+  headers: {
+    'X-API-Key': 'my-secret-api-key-2024'
+  }
+})
+```
+
+**중요**:
+- `application.properties`에는 **BCrypt 해시값**을 저장
+- API 호출 시에는 **평문 키**를 전송
+- 서버는 평문 키를 받아 BCrypt로 검증
+
+### 보안 권장사항
+
+1. **강력한 API 키 사용**: 최소 32자 이상, 영문/숫자/특수문자 혼합
+2. **환경변수 사용**: 프로덕션 환경에서는 환경변수로 관리
+   ```properties
+   api.security.key=${API_KEY_HASH:}
+   ```
+3. **HTTPS 사용**: 평문 키 전송 시 중간자 공격 방지
+4. **키 주기적 갱신**: 정기적으로 API 키 변경
+5. **로그 확인**: ApiKeyFilter는 잘못된 인증 시도를 로그에 기록
+
+### 기존 평문 키에서 마이그레이션
+
+이전에 평문 API 키를 사용했다면 다음 단계로 마이그레이션하세요:
+
+1. 기존 평문 키를 BCrypt로 해시 생성
+2. `api.security.key`를 해시값으로 업데이트
+3. 애플리케이션 재시작
+4. 시작 로그에서 "API Key 설정 검증 완료 (BCrypt 해시 형식)" 확인
+5. API 클라이언트는 변경 불필요 (여전히 평문 전송)
+
+**경고**: BCrypt 해시 형식이 아닌 경우 애플리케이션 시작 시 경고 로그가 출력됩니다.
+
 ```
 
 ## 📝 주요 알고리즘

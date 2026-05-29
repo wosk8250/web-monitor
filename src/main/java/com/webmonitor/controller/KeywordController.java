@@ -4,6 +4,7 @@ import com.webmonitor.domain.Keyword;
 import com.webmonitor.dto.KeywordRequest;
 import com.webmonitor.dto.KeywordResponse;
 import com.webmonitor.service.KeywordService;
+import io.github.resilience4j.ratelimiter.annotation.RateLimiter;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -15,11 +16,13 @@ import java.util.List;
 
 /**
  * 키워드 관리 REST API 컨트롤러
+ * Rate Limiter 적용: API 과부하 방지 (10초당 최대 100 요청)
  */
 @RestController
 @RequestMapping("/api/keywords")
 @RequiredArgsConstructor
 @Slf4j
+@RateLimiter(name = "api")
 public class KeywordController {
 
     private final KeywordService keywordService;

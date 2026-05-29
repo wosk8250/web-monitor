@@ -52,4 +52,10 @@ public interface ArticleRepository extends JpaRepository<Article, Long> {
      * @return 존재 여부
      */
     boolean existsBySiteAndArticleId(Site site, String articleId);
+
+    /**
+     * 특정 사이트의 모든 게시글 삭제
+     * @param site 사이트
+     */
+    void deleteBySite(Site site);
 }

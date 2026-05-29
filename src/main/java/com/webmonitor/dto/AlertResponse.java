@@ -80,15 +80,16 @@ public class AlertResponse {
 
     /**
      * Entity를 DTO로 변환하는 정적 팩토리 메서드
+     * NPE 방어: PRODUCT_RESTOCK 알림의 경우 site가 null일 수 있음
      * @param alert Alert 엔티티
      * @return AlertResponse DTO
      */
     public static AlertResponse from(Alert alert) {
         return AlertResponse.builder()
                 .id(alert.getId())
-                .siteId(alert.getSite().getId())
-                .siteName(alert.getSite().getName())
-                .siteUrl(alert.getSite().getUrl())
+                .siteId(alert.getSite() != null ? alert.getSite().getId() : null)
+                .siteName(alert.getSite() != null ? alert.getSite().getName() : null)
+                .siteUrl(alert.getSite() != null ? alert.getSite().getUrl() : null)
                 .keywordId(alert.getKeyword() != null ? alert.getKeyword().getId() : null)
                 .keywordText(alert.getKeyword() != null ? alert.getKeyword().getKeyword() : null)
                 .message(alert.getMessage())
