@@ -50,14 +50,36 @@
 ### Backend
 - **Java 17**: 최신 자바 LTS 버전
 - **Spring Boot 3.2.4**: 엔터프라이즈급 프레임워크
-- **Spring Data JPA**: ORM 및 데이터 액세스
-- **H2 Database**: 내장 인메모리 데이터베이스
+- **Spring Data JPA**: 복잡한 연관관계(Site-Keyword-Alert)를 객체 그래프로 관리, DB 교체 용이
+- **H2 Database**: 개발/테스트용 인메모리 DB (운영은 PostgreSQL)
+- **PostgreSQL**: 운영 환경 DB
+- **Flyway**: DB 마이그레이션 버전 관리
 - **Lombok**: 보일러플레이트 코드 감소
 
-### Libraries
-- **JSoup 1.17.2**: HTML 파싱 및 웹 크롤링
-- **Spring Web**: RESTful API 제공
-- **SSE (Server-Sent Events)**: 실시간 푸시 알림
+### 크롤링 / 파싱
+- **JSoup 1.17.2**: 정적 HTML 대상 크롤링, HTTP 요청과 파싱을 단일 라이브러리로 처리
+- **SHA-256**: 페이지 변경 감지를 64자 해시 비교로 처리, 저장/비교 비용 최소화
+- **Strategy 패턴 (SiteParserFactory / ProductParserFactory)**: 사이트별 파서를 독립 클래스로 분리, 신규 사이트 추가 시 기존 코드 수정 없음
+
+### 비동기 / 병렬 처리
+- **CompletableFuture + ThreadPoolTaskExecutor**: 사이트별 병렬 크롤링으로 스케줄 지연 방지
+- **Spring @Async**: 제품 모니터링 및 Discord 알림을 별도 스레드 풀에서 비동기 실행
+
+### 알림
+- **SSE (Server-Sent Events)**: 서버→클라이언트 단방향 알림, WebSocket 대비 구현 단순
+- **RestTemplate**: Discord Webhook HTTP POST 호출 (MVC 프로젝트에 기본 포함, WebFlux 의존성 불필요)
+- **JDA 5 (Java Discord API)**: Discord Bot 명령어 처리
+
+### 회복탄력성
+- **Resilience4j CircuitBreaker**: 외부 사이트/Discord 연속 실패 시 전체 시스템 보호
+- **Resilience4j RateLimiter**: API 과호출로 인한 DB/스레드 풀 고갈 방지
+
+### 아키텍처 패턴
+- **Spring Events (ApplicationEventPublisher)**: 순환 의존성 없이 컴포넌트 간 느슨한 결합
+
+### 캐싱 / 모니터링
+- **Caffeine Cache**: 반복 조회 성능 향상 (maximumSize=500, TTL=10분)
+- **Spring Boot Actuator**: 운영 health check, CircuitBreaker 상태, 메트릭 노출
 
 ### Frontend
 - **HTML5 / JavaScript**: 표준 웹 기술
@@ -363,6 +385,139 @@ fetch('http://localhost:8080/api/sites', {
 3. SSE로 실시간 브로드캐스트
 4. 디스코드 웹훅으로 전송
 ```
+
+## 🔨 개선 과정
+
+초기 구현 이후 코드 리뷰를 통해 아래 항목들을 개선했습니다.
+
+### 1. Controller → Service 레이어 분리 / 트랜잭션 일관성 확보
+
+**문제**
+- 일부 Controller가 DTO 변환·비즈니스 로직을 직접 수행
+- Service 메서드가 `@Transactional` 없이 `save()`를 호출하거나, 같은 빈 내부에서 호출되는 메서드에 불필요한 `@Transactional`이 선언됨
+
+**개선**
+- DTO 변환 책임을 Service 레이어로 이관, Controller는 HTTP 처리만 담당
+- 내부 호출 메서드(같은 빈에서 호출)의 `@Transactional` 제거 — Spring AOP 프록시 우회로 인해 어노테이션이 무효하여 코드 혼선 유발
+- 트랜잭션이 필요한 `resetSiteHash()` 등 누락 메서드에 `@Transactional` 추가
+
+---
+
+### 2. Discord 재고 알림 이중 발송 버그 수정
+
+**문제**
+- `MonitorService.saveAndBroadcastAlert()`와 `ProductMonitorService.createRestockAlert()`가 Discord 알림을 직접 전송하면서, 동시에 `AlertService.createAlert()` → `afterCommit` 콜백 → `AlertQueueProcessor` 경로로도 전송
+- 결과: 동일 알림이 Discord에 2회 발송
+
+**개선**
+- `MonitorService`·`ProductMonitorService`의 직접 Discord 전송 코드 제거
+- Discord 전송 책임을 단일 경로(`AlertService → AlertQueueProcessor`)로 통합
+
+---
+
+### 3. Webhook URL 경로 SettingService로 통일
+
+**문제**
+- `MonitorService`는 `SettingService.findActiveSetting()`으로 DB 설정을 읽는 반면
+- `ProductMonitorService`는 `@Value("${discord.webhook.url:}")` 프로퍼티 파일 값을 직접 사용
+- Webhook URL이 DB에만 등록된 경우 제품 재고 알림(`sendFailureAlert`)이 전송되지 않음
+
+**개선**
+- `ProductMonitorService`의 `@Value` 필드 제거, `SettingService` 의존성 추가
+- 모든 Discord 전송 경로가 동일한 DB 설정(활성화된 설정의 `discordWebhookUrl`)을 참조
+
+---
+
+### 4. Discord 자격증명 환경변수 분리
+
+**문제**
+- Discord Webhook URL이 `application.properties`에 평문으로 하드코딩되어 소스코드 노출 위험
+
+**개선**
+- Webhook URL을 DB(`Setting` 엔티티)에서 관리, 런타임에 `SettingService`를 통해 조회
+- 환경변수로 주입해야 하는 값은 프로퍼티 플레이스홀더(`${...}`) 패턴으로 분리
+
+---
+
+### 5. 매직 넘버 상수화 (WebCrawlerConstants)
+
+**문제**
+- `maxBodySize(0)`, `maxBodySize(1024 * 1024)` 등 의미 불명확한 리터럴이 코드 곳곳에 산재
+
+**개선**
+- `WebCrawlerConstants`에 명명된 상수 추가:
+  - `MAX_BODY_SIZE_BYTES = 5MB` — 웹 모니터링 페이지 제한
+  - `PRODUCT_MAX_BODY_SIZE_BYTES = 1MB` — 제품 페이지 제한
+- 모든 크롤러 제한값을 단일 상수 클래스에서 관리
+
+---
+
+### 6. 예외 타입 통일 (도메인 예외 사용)
+
+**문제**
+- `productRepository.findById(id).orElseThrow(() -> new IllegalArgumentException(...))`처럼 범용 예외 사용
+- `GlobalExceptionHandler`에서 `NullPointerException`을 직접 핸들링 — 프로그래밍 오류를 숨김
+
+**개선**
+- `ProductMonitorService`의 4개 위치를 `ProductNotFoundException`으로 교체
+- 프로젝트 전반에서 `SiteNotFoundException`, `KeywordNotFoundException`, `AlertNotFoundException`, `ProductNotFoundException` 등 도메인 전용 예외 일관 사용
+- `GlobalExceptionHandler`의 `NullPointerException` 핸들러 제거 — 오류 원인 파악 보장
+
+---
+
+### 7. Self-call로 인한 @Transactional 무력화 수정
+
+**문제**
+- `MonitorService.processSiteMonitoringResult()`, `ProductMonitorService.processParserBasedMonitoringInternal()` 등이 같은 빈 내부에서 자기 자신을 호출(self-call)
+- Spring AOP 프록시를 우회하여 `@Transactional(REQUIRES_NEW)` 어노테이션이 완전히 무시됨
+- `@Async` 메서드 내부의 self-call도 동일 문제 — async 스레드에서 `this`는 raw bean
+
+**개선**
+- `AlertStatusUpdater`, `MonitorTransactionHandler`, `ProductMonitorTransactionHandler` 세 개의 별도 `@Service` 클래스 도입
+- 트랜잭션 경계가 필요한 메서드를 각 Handler로 이동 → Spring proxy를 경유하여 `@Transactional` 실제 동작 보장
+- `AlertService`, `MonitorService`, `ProductMonitorService`는 thin orchestrator로 단순화, Handler에 위임
+
+---
+
+### 8. API 설계 개선
+
+**문제**
+- URL에 동사 포함: `PATCH /api/sites/{id}/toggle`, `PATCH /api/alerts/{id}/mark-sent`
+- 필터 조건을 경로에 포함: `GET /api/sites/active`, `GET /api/keywords/site/{siteId}`
+- PUT/PATCH 혼용: 부분 업데이트에 PUT 사용
+- 리소스 계층구조 미반영: `/api/alerts/site/{siteId}` 대신 `/api/sites/{siteId}/alerts`
+
+**개선**
+- URL 동사 제거 → PATCH body로 처리: `{"active": false}`, `{"sent": true}`
+- 필터 조건을 쿼리 파라미터로 변경: `GET /api/sites?active=true`, `GET /api/keywords?global=true`
+- 리소스 계층구조 반영: `GET /api/sites/{siteId}/alerts`, `GET /api/sites/{siteId}/keywords`
+- 부분 업데이트 PATCH로 통일, 유효하지 않은 파라미터 조합에 400 반환
+
+---
+
+### 9. DB 설계 개선
+
+**문제**
+- `articles` 테이블에 인덱스 없음 — 모니터링 루프에서 `existsBySiteAndArticleId/Url` 호출 시 전체 스캔
+- `keywords` 테이블에 인덱스 없음 — 사이트 수 × 모니터링 주기만큼 `findBySiteAndActive` 전체 스캔
+- `alerts` 테이블에 단일 컬럼 인덱스(`sent`, `priority`)가 복합 인덱스와 중복
+- `alerts.priority`가 `alertType`에 이행적 함수 종속 (`id → alertType → priority`) — 3NF 위반
+
+**개선**
+- 복합 인덱스 추가: `articles(site_id, article_id)`, `articles(site_id, article_url)`, `keywords(site_id, active)`, `sites(active)`
+- 중복 인덱스 제거: `idx_alert_sent`, `idx_alert_priority` 삭제 → `idx_alert_sent_priority(sent, priority, detected_at)` 단일 복합 인덱스로 통합
+- `@PrePersist`에 `@PreUpdate` 추가 → `syncPriority()`로 `alertType` 변경 시 `priority` 자동 동기화
+
+---
+
+### 10. 시스템 설계 개선
+
+- 스케줄러 중첩 실행 시 동일 사이트 중복 모니터링 방지 (inProgressSites 가드 추가)
+- 알림 테이블 전체 메모리 로드 → JPQL 배치 쿼리로 변경 (OOM 방지)
+- article unique constraint 위반 시 트랜잭션 롤백으로 알림 소실 → 예외 catch로 격리
+- 스케일 한계 파악: 사이트 30+, SSE 클라이언트 500+, 멀티 인스턴스 미지원 (향후 개선 예정)
+
+---
 
 ## 🤝 기여
 
