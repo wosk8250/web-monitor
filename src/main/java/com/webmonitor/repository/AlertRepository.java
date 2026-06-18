@@ -11,6 +11,7 @@ import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -82,6 +83,14 @@ public interface AlertRepository extends JpaRepository<Alert, Long> {
     List<Alert> findBySentOrderByDetectedAtDesc(Boolean sent);
 
     /**
+     * 전송 여부별 알림을 우선순위 → 최신순으로 조회 (N+1 쿼리 방지)
+     * @param sent 전송 여부
+     * @return 우선순위 내림차순, 최신순으로 정렬된 알림 목록
+     */
+    @EntityGraph(attributePaths = {"site", "keyword", "product"})
+    List<Alert> findBySentOrderByPriorityDescDetectedAtDesc(Boolean sent);
+
+    /**
      * 특정 사이트의 알림 개수 조회
      * @param site 사이트 엔티티
      * @return 해당 사이트의 알림 개수
@@ -106,14 +115,8 @@ public interface AlertRepository extends JpaRepository<Alert, Long> {
      * 최근 알림 조회 (개수 제한)
      * @return 최신순 알림 목록 (최대 5개)
      */
+    @EntityGraph(attributePaths = {"site", "keyword", "product"})
     List<Alert> findTop5ByOrderByDetectedAtDesc();
-
-    /**
-     * 특정 시간 이전의 알림 조회 (자동 정리용)
-     * @param dateTime 기준 시간
-     * @return 기준 시간 이전 알림 목록
-     */
-    List<Alert> findByDetectedAtBefore(LocalDateTime dateTime);
 
     /**
      * 특정 사이트 ID의 알림을 최신순으로 조회 (N+1 쿼리 방지)
@@ -219,4 +222,26 @@ public interface AlertRepository extends JpaRepository<Alert, Long> {
      * @return 오래된 순으로 정렬된 알림 페이지
      */
     Page<Alert> findBySiteOrderByDetectedAtAsc(Site site, Pageable pageable);
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("UPDATE Alert a SET a.sent = true, a.sentAt = :sentAt WHERE a.id IN :ids")
+    int markAsSentByIds(@Param("ids") List<Long> ids, @Param("sentAt") LocalDateTime sentAt);
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("UPDATE Alert a SET a.keyword = null WHERE a.keyword.id = :keywordId")
+    void clearKeywordReference(@Param("keywordId") Long keywordId);
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("UPDATE Alert a SET a.product = null WHERE a.product.id = :productId")
+    void clearProductReference(@Param("productId") Long productId);
+
+    @Query("SELECT a.site FROM Alert a WHERE a.site IS NOT NULL GROUP BY a.site HAVING COUNT(a) > :maxAlerts")
+    List<com.webmonitor.domain.Site> findSitesWithAlertCountExceeding(@Param("maxAlerts") long maxAlerts);
+
+    @Transactional
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("DELETE FROM Alert a WHERE a.alertType = :alertType AND a.detectedAt < :cutoffDate")
+    int deleteByAlertTypeAndDetectedAtBefore(
+            @Param("alertType") Alert.AlertType alertType,
+            @Param("cutoffDate") LocalDateTime cutoffDate);
 }

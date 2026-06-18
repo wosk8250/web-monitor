@@ -19,8 +19,9 @@ import java.util.List;
  */
 @Entity // JPA 엔티티로 지정 (데이터베이스 테이블과 매핑)
 @Table(name = "sites", indexes = {
+        @Index(name = "idx_site_active",       columnList = "active"),
         @Index(name = "idx_site_discord_user", columnList = "discordUserId")
-}) // 테이블 이름을 'sites'로 지정, Discord User ID 인덱스 추가
+})
 @Getter // 모든 필드의 Getter 메서드 자동 생성
 @Setter // 모든 필드의 Setter 메서드 자동 생성
 @NoArgsConstructor // 파라미터가 없는 기본 생성자 자동 생성

@@ -18,9 +18,7 @@ import java.time.LocalDateTime;
     @Index(name = "idx_alert_keyword", columnList = "keyword_id"),
     @Index(name = "idx_alert_product", columnList = "product_id"),
     @Index(name = "idx_alert_detected_at", columnList = "detected_at"),
-    @Index(name = "idx_alert_sent", columnList = "sent"),
-    @Index(name = "idx_alert_site_detected", columnList = "site_id, detected_at"),
-    @Index(name = "idx_alert_priority", columnList = "priority"),
+    @Index(name = "idx_alert_site_detected",  columnList = "site_id, detected_at"),
     @Index(name = "idx_alert_sent_priority", columnList = "sent, priority, detected_at")
 }) // 테이블 이름 및 인덱스 설정
 @Getter // 모든 필드의 Getter 메서드 자동 생성
@@ -103,18 +101,10 @@ public class Alert {
     // 최대 재시도 횟수 (3회)
     public static final int MAX_RETRIES = 3;
 
-    /**
-     * 알림 생성 전 우선순위 자동 설정
-     * PRODUCT_RESTOCK -> HIGH (즉시 발송)
-     * KEYWORD, CONTENT_CHANGE -> NORMAL (대기열 처리)
-     */
+    // alertType은 생성 후 불변 — @PrePersist에서만 설정, UPDATE 시 재계산 불필요
     @PrePersist
-    public void prePersist() {
-        if (alertType == AlertType.PRODUCT_RESTOCK) {
-            this.priority = Priority.HIGH;
-        } else {
-            this.priority = Priority.NORMAL;
-        }
+    public void syncPriority() {
+        this.priority = (alertType == AlertType.PRODUCT_RESTOCK) ? Priority.HIGH : Priority.NORMAL;
     }
 
     /**

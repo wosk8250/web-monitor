@@ -2,9 +2,7 @@ package com.webmonitor.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.webmonitor.domain.Alert;
-import com.webmonitor.domain.Setting;
 import com.webmonitor.dto.AlertResponse;
-import com.webmonitor.repository.SettingRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.MediaType;
@@ -24,7 +22,6 @@ import java.util.concurrent.CopyOnWriteArrayList;
 @Slf4j // 로그 사용을 위한 Logger 자동 생성
 public class SseService {
 
-    private final SettingRepository settingRepository;
     private final ObjectMapper objectMapper; // JSON 변환을 위한 ObjectMapper
 
     // SseEmitter를 저장하는 맵 (클라이언트 ID별로 관리)
@@ -49,21 +46,21 @@ public class SseService {
 
         log.info("SSE 구독 시작: 클라이언트 ID = {}", clientId);
 
-        // 기존 연결이 있다면 제거
-        if (emitters.containsKey(clientId)) {
-            emitters.get(clientId).complete();
-            emitters.remove(clientId);
+        // 기존 연결 교체 (atomic put으로 race condition 방지)
+        SseEmitter oldEmitter = emitters.put(clientId, emitter);
+        if (oldEmitter != null) {
+            oldEmitter.complete();
+            emitterList.remove(oldEmitter); // HTTP 핸들러 미연결 시 onCompletion이 발동하지 않으므로 명시적 제거 필요
             log.debug("기존 SSE 연결 제거: 클라이언트 ID = {}", clientId);
         }
-
-        // 새로운 Emitter 등록
-        emitters.put(clientId, emitter);
         emitterList.add(emitter);
 
         // 연결 완료 시 처리
+        // remove(key, value): clientId에 대한 매핑이 정확히 이 emitter일 때만 제거
+        // 같은 clientId로 재구독이 발생해 새 emitter로 교체된 경우 제거하지 않음
         emitter.onCompletion(() -> {
             log.info("SSE 연결 완료: 클라이언트 ID = {}", clientId);
-            emitters.remove(clientId);
+            emitters.remove(clientId, emitter);
             emitterList.remove(emitter);
         });
 
@@ -71,7 +68,7 @@ public class SseService {
         emitter.onTimeout(() -> {
             log.warn("SSE 연결 타임아웃: 클라이언트 ID = {}", clientId);
             emitter.complete();
-            emitters.remove(clientId);
+            emitters.remove(clientId, emitter);
             emitterList.remove(emitter);
         });
 
@@ -79,7 +76,7 @@ public class SseService {
         emitter.onError((e) -> {
             log.error("SSE 연결 오류: 클라이언트 ID = {}, 오류 = {}", clientId, e.getMessage());
             emitter.complete();
-            emitters.remove(clientId);
+            emitters.remove(clientId, emitter);
             emitterList.remove(emitter);
         });
 
@@ -124,7 +121,7 @@ public class SseService {
         } catch (IOException e) {
             log.error("SSE 알림 전송 실패: 클라이언트 ID = {}, 오류 = {}", clientId, e.getMessage());
             emitter.completeWithError(e);
-            emitters.remove(clientId);
+            emitters.remove(clientId, emitter);
             emitterList.remove(emitter);
         }
     }
@@ -186,7 +183,13 @@ public class SseService {
     public void closeAllConnections() {
         log.info("모든 SSE 연결 종료 시작: 연결 수 = {}", emitterList.size());
 
-        emitterList.forEach(SseEmitter::complete);
+        emitterList.forEach(emitter -> {
+            try {
+                emitter.complete();
+            } catch (Exception e) {
+                log.warn("SSE emitter 종료 실패: {}", e.getMessage());
+            }
+        });
         emitters.clear();
         emitterList.clear();
 

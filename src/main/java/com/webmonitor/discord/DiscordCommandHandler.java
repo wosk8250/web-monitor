@@ -3,9 +3,11 @@ package com.webmonitor.discord;
 import com.webmonitor.domain.Keyword;
 import com.webmonitor.domain.Product;
 import com.webmonitor.domain.Site;
+import com.webmonitor.util.DiscordConstants;
 import com.webmonitor.repository.KeywordRepository;
 import com.webmonitor.repository.ProductRepository;
 import com.webmonitor.repository.SiteRepository;
+import com.webmonitor.service.KeywordService;
 import com.webmonitor.service.ProductMonitorService;
 import com.webmonitor.service.ProductService;
 import com.webmonitor.service.SiteService;
@@ -14,17 +16,17 @@ import lombok.extern.slf4j.Slf4j;
 import net.dv8tion.jda.api.EmbedBuilder;
 import net.dv8tion.jda.api.events.interaction.command.SlashCommandInteractionEvent;
 import net.dv8tion.jda.api.hooks.ListenerAdapter;
+import net.dv8tion.jda.api.interactions.InteractionHook;
 import net.dv8tion.jda.api.interactions.commands.OptionMapping;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Component;
 
 import java.awt.*;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
-/**
- * 디스코드 Slash Command 핸들러
- */
 @Component
 @RequiredArgsConstructor
 @Slf4j
@@ -33,6 +35,7 @@ public class DiscordCommandHandler extends ListenerAdapter {
     private final SiteRepository siteRepository;
     private final KeywordRepository keywordRepository;
     private final ProductRepository productRepository;
+    private final KeywordService keywordService;
     private final ProductService productService;
     private final ProductMonitorService productMonitorService;
     private final SiteService siteService;
@@ -63,22 +66,22 @@ public class DiscordCommandHandler extends ListenerAdapter {
         }
     }
 
-    /**
-     * 사이트 추가 명령어 처리
-     */
     private void handleAddSite(SlashCommandInteractionEvent event) {
         String url = event.getOption("url", OptionMapping::getAsString);
         String name = event.getOption("name", OptionMapping::getAsString);
-        String userId = event.getUser().getId();  // Discord User ID 추출
+        String keywordText = event.getOption("keyword", OptionMapping::getAsString);
 
         if (url == null || name == null) {
-            event.reply("❌ URL과 이름을 모두 입력해주세요.").setEphemeral(true).queue();
+            replyError(event, "❌ URL과 이름을 모두 입력해주세요.");
             return;
         }
 
-        // 사용자별 중복 체크 (성능 최적화: exists 메서드 사용)
+        event.deferReply(true).queue(null, e -> log.error("Discord Defer 실패: {}", e.getMessage()));
+        InteractionHook hook = event.getHook();
+        String userId = event.getUser().getId();
+
         if (siteRepository.existsByDiscordUserIdAndUrl(userId, url)) {
-            event.reply("❌ 이미 등록한 URL입니다.").setEphemeral(true).queue();
+            hook.editOriginal("❌ 이미 등록한 URL입니다.").queue(null, e -> log.error("Discord 응답 실패: {}", e.getMessage()));
             return;
         }
 
@@ -87,63 +90,99 @@ public class DiscordCommandHandler extends ListenerAdapter {
                 .url(url)
                 .active(true)
                 .detectContentChange(true)
-                .discordUserId(userId)  // Discord User ID 저장
+                .discordUserId(userId)
                 .build();
 
-        siteRepository.save(site);
-        log.info("사이트 추가됨: {} ({}) - 사용자: {}", name, url, userId);
+        try {
+            siteRepository.save(site);
+        } catch (DataIntegrityViolationException e) {
+            log.warn("사이트 저장 중 중복 URL 감지 (TOCTOU): {} - 사용자: {}", url, userId);
+            hook.editOriginal("❌ 이미 등록한 URL입니다.").queue(null, ex -> log.error("Discord 응답 실패: {}", ex.getMessage()));
+            return;
+        }
+
+        String monitoringMode;
+        if (keywordText != null && !keywordText.isBlank()) {
+            String trimmedKeyword = keywordText.strip();
+            try {
+                keywordService.addKeywordToSite(site, trimmedKeyword);
+            } catch (Exception e) {
+                log.error("키워드 저장 실패 — 사이트 롤백 시도: {} ({}) 키워드: {} - 사용자: {}", name, url, trimmedKeyword, userId, e);
+                try {
+                    siteRepository.delete(site);
+                } catch (Exception deleteEx) {
+                    log.error("사이트 롤백 실패 (고아 사이트 발생 가능): {} - 사용자: {}", name, userId, deleteEx);
+                }
+                hook.editOriginal("❌ 키워드 저장 중 오류가 발생했습니다. 다시 시도해주세요.")
+                        .queue(null, ex -> log.error("Discord 응답 실패: {}", ex.getMessage()));
+                return;
+            }
+            monitoringMode = "키워드: " + trimmedKeyword;
+            log.info("사이트 추가됨 (키워드 모드): {} ({}) 키워드: {} - 사용자: {}", name, url, trimmedKeyword, userId);
+        } else {
+            monitoringMode = "전체글 알림";
+            log.info("사이트 추가됨 (전체글 모드): {} ({}) - 사용자: {}", name, url, userId);
+        }
 
         EmbedBuilder embed = new EmbedBuilder()
                 .setTitle("✅ 사이트가 추가되었습니다")
                 .setColor(Color.GREEN)
                 .addField("이름", name, true)
-                .addField("URL", url, true)
                 .addField("상태", "활성", true)
+                .addField("알림 모드", monitoringMode, true)
+                .addField("URL", url, false)
                 .setFooter("사이트 ID: " + site.getId());
 
-        event.replyEmbeds(embed.build()).queue();
+        hook.editOriginalEmbeds(embed.build()).queue(null, e -> log.error("Discord 응답 실패: {}", e.getMessage()));
     }
 
-    /**
-     * 사이트 삭제 명령어 처리
-     */
     private void handleRemoveSite(SlashCommandInteractionEvent event) {
         String name = event.getOption("name", OptionMapping::getAsString);
-        String userId = event.getUser().getId();  // Discord User ID 추출
 
         if (name == null) {
-            event.reply("❌ 사이트 이름을 입력해주세요.").setEphemeral(true).queue();
+            replyError(event, "❌ 사이트 이름을 입력해주세요.");
             return;
         }
 
-        // 사용자의 사이트만 검색
+        event.deferReply(true).queue(null, e -> log.error("Discord Defer 실패: {}", e.getMessage()));
+        InteractionHook hook = event.getHook();
+        String userId = event.getUser().getId();
+
         List<Site> sites = siteRepository.findByDiscordUserIdAndName(userId, name);
 
         if (sites.isEmpty()) {
-            event.reply("❌ 해당 이름의 사이트를 찾을 수 없습니다.").setEphemeral(true).queue();
+            hook.editOriginal("❌ 해당 이름의 사이트를 찾을 수 없습니다.").queue(null, e -> log.error("Discord 응답 실패: {}", e.getMessage()));
             return;
         }
 
         Site site = sites.get(0);
-        siteRepository.delete(site);
+        try {
+            siteService.deleteSite(site.getId());
+        } catch (Exception e) {
+            log.error("사이트 삭제 실패: {} - 사용자: {}", site.getName(), userId, e);
+            hook.editOriginal("❌ 사이트 삭제 중 오류가 발생했습니다. 다시 시도해주세요.")
+                    .queue(null, ex -> log.error("Discord 응답 실패: {}", ex.getMessage()));
+            return;
+        }
         log.info("사이트 삭제됨: {} ({}) - 사용자: {}", site.getName(), site.getUrl(), userId);
 
-        event.reply("✅ 사이트가 삭제되었습니다: **" + site.getName() + "**").queue();
+        hook.editOriginal("✅ 사이트가 삭제되었습니다: **" + site.getName() + "**").queue(null, e -> log.error("Discord 응답 실패: {}", e.getMessage()));
     }
 
-    /**
-     * 사이트 목록 조회 명령어 처리
-     */
     private void handleListSites(SlashCommandInteractionEvent event) {
-        String userId = event.getUser().getId();  // Discord User ID 추출
+        event.deferReply(true).queue(null, e -> log.error("Discord Defer 실패: {}", e.getMessage()));
+        InteractionHook hook = event.getHook();
 
-        // 사용자의 사이트만 조회
+        String userId = event.getUser().getId();
         List<Site> sites = siteRepository.findByDiscordUserId(userId);
 
         if (sites.isEmpty()) {
-            event.reply("📋 등록된 사이트가 없습니다.").queue();
+            hook.editOriginal("📋 등록된 사이트가 없습니다.").queue(null, e -> log.error("Discord 응답 실패: {}", e.getMessage()));
             return;
         }
+
+        Map<Long, Long> keywordCountBySite = keywordRepository.findBySiteIn(sites).stream()
+                .collect(Collectors.groupingBy(k -> k.getSite().getId(), Collectors.counting()));
 
         EmbedBuilder embed = new EmbedBuilder()
                 .setTitle("📋 등록된 사이트 목록")
@@ -152,10 +191,8 @@ public class DiscordCommandHandler extends ListenerAdapter {
 
         for (Site site : sites) {
             String status = site.getActive() ? "✅ 활성" : "⏸️ 비활성";
-            List<Keyword> keywords = keywordRepository.findBySite(site);
-            String keywordInfo = keywords.isEmpty()
-                ? "전체 페이지 감지"
-                : keywords.size() + "개 키워드";
+            long keywordCount = keywordCountBySite.getOrDefault(site.getId(), 0L);
+            String keywordInfo = keywordCount == 0 ? "전체 페이지 감지" : keywordCount + "개 키워드";
 
             embed.addField(
                 site.getName(),
@@ -166,96 +203,103 @@ public class DiscordCommandHandler extends ListenerAdapter {
             );
         }
 
-        event.replyEmbeds(embed.build()).queue();
+        hook.editOriginalEmbeds(embed.build()).queue(null, e -> log.error("Discord 응답 실패: {}", e.getMessage()));
     }
 
-    /**
-     * 사이트 활성화/비활성화 토글
-     */
     private void handleToggleSite(SlashCommandInteractionEvent event) {
         String name = event.getOption("name", OptionMapping::getAsString);
-        String userId = event.getUser().getId();  // Discord User ID 추출
 
         if (name == null) {
-            event.reply("❌ 사이트 이름을 입력해주세요.").setEphemeral(true).queue();
+            replyError(event, "❌ 사이트 이름을 입력해주세요.");
             return;
         }
 
-        // 사용자의 사이트만 검색
+        event.deferReply(true).queue(null, e -> log.error("Discord Defer 실패: {}", e.getMessage()));
+        InteractionHook hook = event.getHook();
+        String userId = event.getUser().getId();
+
         List<Site> sites = siteRepository.findByDiscordUserIdAndName(userId, name);
 
         if (sites.isEmpty()) {
-            event.reply("❌ 해당 이름의 사이트를 찾을 수 없습니다.").setEphemeral(true).queue();
+            hook.editOriginal("❌ 해당 이름의 사이트를 찾을 수 없습니다.").queue(null, e -> log.error("Discord 응답 실패: {}", e.getMessage()));
             return;
         }
 
         Site site = sites.get(0);
         site.setActive(!site.getActive());
-        siteRepository.save(site);
-
+        try {
+            siteRepository.save(site);
+        } catch (Exception e) {
+            log.error("사이트 상태 변경 실패: {} - 사용자: {}", site.getName(), userId, e);
+            hook.editOriginal("❌ 사이트 상태 변경 중 오류가 발생했습니다. 다시 시도해주세요.")
+                    .queue(null, ex -> log.error("Discord 응답 실패: {}", ex.getMessage()));
+            return;
+        }
         String status = site.getActive() ? "✅ 활성화" : "⏸️ 비활성화";
-        event.reply(status + "되었습니다: **" + site.getName() + "**").queue();
+        hook.editOriginal(status + "되었습니다: **" + site.getName() + "**").queue(null, e -> log.error("Discord 응답 실패: {}", e.getMessage()));
     }
 
-    /**
-     * 키워드 추가 명령어 처리
-     */
     private void handleAddKeyword(SlashCommandInteractionEvent event) {
         String siteName = event.getOption("site", OptionMapping::getAsString);
         String keywordText = event.getOption("keyword", OptionMapping::getAsString);
-        String userId = event.getUser().getId();  // Discord User ID 추출
 
         if (siteName == null || keywordText == null) {
-            event.reply("❌ 사이트 이름과 키워드를 모두 입력해주세요.").setEphemeral(true).queue();
+            replyError(event, "❌ 사이트 이름과 키워드를 모두 입력해주세요.");
             return;
         }
 
-        // 사용자의 사이트만 검색
+        String trimmedKeyword = keywordText.strip();
+        if (trimmedKeyword.isEmpty()) {
+            replyError(event, "❌ 키워드를 입력해주세요.");
+            return;
+        }
+
+        event.deferReply(true).queue(null, e -> log.error("Discord Defer 실패: {}", e.getMessage()));
+        InteractionHook hook = event.getHook();
+        String userId = event.getUser().getId();
+
         List<Site> sites = siteRepository.findByDiscordUserIdAndName(userId, siteName);
 
         if (sites.isEmpty()) {
-            event.reply("❌ 해당 이름의 사이트를 찾을 수 없습니다.").setEphemeral(true).queue();
+            hook.editOriginal("❌ 해당 이름의 사이트를 찾을 수 없습니다.").queue(null, e -> log.error("Discord 응답 실패: {}", e.getMessage()));
             return;
         }
 
         Site site = sites.get(0);
 
-        // 사이트의 detectContentChange를 false로 변경 (키워드 모드로 전환)
-        if (site.getDetectContentChange()) {
-            site.setDetectContentChange(false);
-            siteRepository.save(site);
-        }
-
-        Keyword keyword = Keyword.builder()
-                .keyword(keywordText)
-                .site(site)
-                .active(true)
-                .build();
-
-        keywordRepository.save(keyword);
-        log.info("키워드 추가됨: {} -> {} - 사용자: {}", site.getName(), keywordText, userId);
-
-        event.reply("✅ 키워드가 추가되었습니다: **" + keywordText + "** (사이트: " + site.getName() + ")").queue();
-    }
-
-    /**
-     * 키워드 삭제 명령어 처리
-     */
-    private void handleRemoveKeyword(SlashCommandInteractionEvent event) {
-        String siteName = event.getOption("site", OptionMapping::getAsString);
-        String keywordText = event.getOption("keyword", OptionMapping::getAsString);
-        String userId = event.getUser().getId();  // Discord User ID 추출
-
-        if (siteName == null || keywordText == null) {
-            event.reply("❌ 사이트 이름과 키워드를 모두 입력해주세요.").setEphemeral(true).queue();
+        try {
+            keywordService.addKeywordToSite(site, trimmedKeyword);
+        } catch (IllegalArgumentException e) {
+            hook.editOriginal("❌ " + e.getMessage()).queue(null, ex -> log.error("Discord 응답 실패: {}", ex.getMessage()));
+            return;
+        } catch (Exception e) {
+            log.error("키워드 추가 실패: {} 사이트: {} - 사용자: {}", trimmedKeyword, siteName, userId, e);
+            hook.editOriginal("❌ 키워드 추가 중 오류가 발생했습니다. 다시 시도해주세요.").queue(null, ex -> log.error("Discord 응답 실패: {}", ex.getMessage()));
             return;
         }
 
-        // 사용자의 사이트만 검색
+        log.info("키워드 추가됨: {} 사이트: {} - 사용자: {}", trimmedKeyword, siteName, userId);
+        hook.editOriginal("✅ 키워드가 추가되었습니다: **" + trimmedKeyword + "** → 사이트: **" + site.getName() + "**")
+                .queue(null, e -> log.error("Discord 응답 실패: {}", e.getMessage()));
+    }
+
+    private void handleRemoveKeyword(SlashCommandInteractionEvent event) {
+        String siteName = event.getOption("site", OptionMapping::getAsString);
+        String keywordText = event.getOption("keyword", OptionMapping::getAsString);
+
+        if (siteName == null || keywordText == null) {
+            replyError(event, "❌ 사이트 이름과 키워드를 모두 입력해주세요.");
+            return;
+        }
+
+        event.deferReply(true).queue(null, e -> log.error("Discord Defer 실패: {}", e.getMessage()));
+        InteractionHook hook = event.getHook();
+        String userId = event.getUser().getId();
+
         List<Site> sites = siteRepository.findByDiscordUserIdAndName(userId, siteName);
 
         if (sites.isEmpty()) {
-            event.reply("❌ 해당 이름의 사이트를 찾을 수 없습니다.").setEphemeral(true).queue();
+            hook.editOriginal("❌ 해당 이름의 사이트를 찾을 수 없습니다.").queue(null, e -> log.error("Discord 응답 실패: {}", e.getMessage()));
             return;
         }
 
@@ -263,43 +307,41 @@ public class DiscordCommandHandler extends ListenerAdapter {
         List<Keyword> keywords = keywordRepository.findBySite(site);
 
         Optional<Keyword> keywordOpt = keywords.stream()
-                .filter(k -> k.getKeyword().equals(keywordText))
+                .filter(k -> k.getKeyword().equals(keywordText.strip()))
                 .findFirst();
 
         if (keywordOpt.isEmpty()) {
-            event.reply("❌ 해당 키워드를 찾을 수 없습니다.").setEphemeral(true).queue();
+            hook.editOriginal("❌ 해당 키워드를 찾을 수 없습니다.").queue(null, e -> log.error("Discord 응답 실패: {}", e.getMessage()));
             return;
         }
 
-        keywordRepository.delete(keywordOpt.get());
-
-        // 키워드가 모두 삭제되면 전체 페이지 감지 모드로 전환
-        List<Keyword> remainingKeywords = keywordRepository.findBySite(site);
-        if (remainingKeywords.isEmpty()) {
-            site.setDetectContentChange(true);
-            siteRepository.save(site);
+        try {
+            keywordService.removeKeywordFromSite(site, keywordOpt.get());
+        } catch (Exception e) {
+            log.error("키워드 삭제 실패: {} 사이트: {} - 사용자: {}", keywordText, siteName, userId, e);
+            hook.editOriginal("❌ 키워드 삭제 중 오류가 발생했습니다. 다시 시도해주세요.").queue(null, ex -> log.error("Discord 응답 실패: {}", ex.getMessage()));
+            return;
         }
 
-        event.reply("✅ 키워드가 삭제되었습니다: **" + keywordText + "**").queue();
+        hook.editOriginal("✅ 키워드가 삭제되었습니다: **" + keywordText.strip() + "**").queue(null, e -> log.error("Discord 응답 실패: {}", e.getMessage()));
     }
 
-    /**
-     * 키워드 목록 조회 명령어 처리
-     */
     private void handleListKeywords(SlashCommandInteractionEvent event) {
         String siteName = event.getOption("site", OptionMapping::getAsString);
-        String userId = event.getUser().getId();  // Discord User ID 추출
 
         if (siteName == null) {
-            event.reply("❌ 사이트 이름을 입력해주세요.").setEphemeral(true).queue();
+            replyError(event, "❌ 사이트 이름을 입력해주세요.");
             return;
         }
 
-        // 사용자의 사이트만 검색
+        event.deferReply(true).queue(null, e -> log.error("Discord Defer 실패: {}", e.getMessage()));
+        InteractionHook hook = event.getHook();
+        String userId = event.getUser().getId();
+
         List<Site> sites = siteRepository.findByDiscordUserIdAndName(userId, siteName);
 
         if (sites.isEmpty()) {
-            event.reply("❌ 해당 이름의 사이트를 찾을 수 없습니다.").setEphemeral(true).queue();
+            hook.editOriginal("❌ 해당 이름의 사이트를 찾을 수 없습니다.").queue(null, e -> log.error("Discord 응답 실패: {}", e.getMessage()));
             return;
         }
 
@@ -307,7 +349,7 @@ public class DiscordCommandHandler extends ListenerAdapter {
         List<Keyword> keywords = keywordRepository.findBySite(site);
 
         if (keywords.isEmpty()) {
-            event.reply("📋 등록된 키워드가 없습니다. (전체 페이지 감지 모드)").queue();
+            hook.editOriginal("📋 등록된 키워드가 없습니다. (전체 페이지 감지 모드)").queue(null, e -> log.error("Discord 응답 실패: {}", e.getMessage()));
             return;
         }
 
@@ -321,22 +363,19 @@ public class DiscordCommandHandler extends ListenerAdapter {
                 .setDescription(keywordList)
                 .setFooter("총 " + keywords.size() + "개");
 
-        event.replyEmbeds(embed.build()).queue();
+        hook.editOriginalEmbeds(embed.build()).queue(null, e -> log.error("Discord 응답 실패: {}", e.getMessage()));
     }
 
-    /**
-     * 시스템 상태 조회 명령어 처리
-     */
     private void handleStatus(SlashCommandInteractionEvent event) {
-        String userId = event.getUser().getId();  // Discord User ID 추출
+        event.deferReply(true).queue(null, e -> log.error("Discord Defer 실패: {}", e.getMessage()));
+        InteractionHook hook = event.getHook();
 
-        // 사용자의 데이터만 조회
+        String userId = event.getUser().getId();
+
         List<Site> sites = siteRepository.findByDiscordUserId(userId);
         long totalSites = sites.size();
         long activeSites = sites.stream().filter(Site::getActive).count();
-        long totalKeywords = sites.stream()
-                .mapToLong(site -> keywordRepository.findBySite(site).size())
-                .sum();
+        long totalKeywords = sites.isEmpty() ? 0L : keywordRepository.countBySiteIn(sites);
 
         List<Product> products = productRepository.findByDiscordUserId(userId);
         long totalProducts = products.size();
@@ -350,51 +389,50 @@ public class DiscordCommandHandler extends ListenerAdapter {
                 .addField("전체 키워드", String.valueOf(totalKeywords), true)
                 .addField("전체 제품", String.valueOf(totalProducts), true)
                 .addField("활성 제품", String.valueOf(activeProducts), true)
-                .addField("", "", true) // empty field for layout
+                .addField("", "", true)
                 .setFooter("웹 모니터링 시스템 v1.0");
 
-        event.replyEmbeds(embed.build()).queue();
+        hook.editOriginalEmbeds(embed.build()).queue(null, e -> log.error("Discord 응답 실패: {}", e.getMessage()));
     }
 
-    /**
-     * 제품 추가 명령어 처리
-     */
     private void handleAddProduct(SlashCommandInteractionEvent event) {
         String name = event.getOption("name", OptionMapping::getAsString);
         String url = event.getOption("url", OptionMapping::getAsString);
         String priorityStr = event.getOption("priority", "NORMAL", OptionMapping::getAsString);
         Integer interval = event.getOption("interval", 3, OptionMapping::getAsInt);
         String selector = event.getOption("selector", OptionMapping::getAsString);
-        String userId = event.getUser().getId();  // Discord User ID 추출
 
         if (name == null || url == null) {
-            event.reply("❌ 제품 이름과 URL을 모두 입력해주세요.").setEphemeral(true).queue();
+            replyError(event, "❌ 제품 이름과 URL을 모두 입력해주세요.");
             return;
         }
 
-        // 우선순위 유효성 검사
         Product.Priority priority;
         try {
             priority = Product.Priority.valueOf(priorityStr.toUpperCase());
         } catch (IllegalArgumentException e) {
-            event.reply("❌ 우선순위는 URGENT 또는 NORMAL이어야 합니다.").setEphemeral(true).queue();
+            replyError(event, "❌ 우선순위는 URGENT 또는 NORMAL이어야 합니다.");
             return;
         }
 
-        // CSS 셀렉터 유효성 검사
-        if (selector != null && !selector.trim().isEmpty()) {
+        if (interval < 1) {
+            replyError(event, "❌ 체크 주기는 최소 1분이어야 합니다.");
+            return;
+        }
+
+        if (selector != null && !selector.strip().isEmpty()) {
             if (!isValidCssSelector(selector)) {
-                event.reply("❌ 잘못된 CSS 셀렉터 형식입니다.\n" +
-                        "예시: `.price`, `#stock-status`, `div.product-info`, `span[class='stock']`")
-                        .setEphemeral(true)
-                        .queue();
+                replyError(event, "❌ 잘못된 CSS 셀렉터 형식입니다.\n예시: `.price`, `#stock-status`, `div.product-info`, `span[class='stock']`");
                 return;
             }
         }
 
-        // 사용자별 URL 중복 체크 (성능 최적화: exists 메서드 사용)
+        event.deferReply(true).queue(null, e -> log.error("Discord Defer 실패: {}", e.getMessage()));
+        InteractionHook hook = event.getHook();
+        String userId = event.getUser().getId();
+
         if (productRepository.existsByDiscordUserIdAndUrl(userId, url)) {
-            event.reply("❌ 이미 등록한 제품 URL입니다.").setEphemeral(true).queue();
+            hook.editOriginal("❌ 이미 등록한 제품 URL입니다.").queue(null, e -> log.error("Discord 응답 실패: {}", e.getMessage()));
             return;
         }
 
@@ -404,10 +442,17 @@ public class DiscordCommandHandler extends ListenerAdapter {
                 .priority(priority)
                 .checkIntervalMinutes(interval)
                 .contentSelector(selector)
-                .discordUserId(userId)  // Discord User ID 저장
+                .discordUserId(userId)
                 .build();
 
-        Product saved = productService.createProduct(product);
+        Product saved;
+        try {
+            saved = productService.createProduct(product);
+        } catch (DataIntegrityViolationException e) {
+            log.warn("제품 저장 중 중복 URL 감지 (TOCTOU): {} - 사용자: {}", url, userId);
+            hook.editOriginal("❌ 이미 등록한 제품 URL입니다.").queue(null, ex -> log.error("Discord 응답 실패: {}", ex.getMessage()));
+            return;
+        }
         log.info("제품 추가됨: {} ({}), 셀렉터: {} - 사용자: {}", name, url, selector != null ? selector : "전체 페이지", userId);
 
         EmbedBuilder embed = new EmbedBuilder()
@@ -422,47 +467,51 @@ public class DiscordCommandHandler extends ListenerAdapter {
                 .addField("URL", url, false)
                 .setFooter("제품 ID: " + saved.getId());
 
-        event.replyEmbeds(embed.build()).queue();
+        hook.editOriginalEmbeds(embed.build()).queue(null, e -> log.error("Discord 응답 실패: {}", e.getMessage()));
     }
 
-    /**
-     * 제품 삭제 명령어 처리
-     */
     private void handleRemoveProduct(SlashCommandInteractionEvent event) {
         String name = event.getOption("name", OptionMapping::getAsString);
-        String userId = event.getUser().getId();  // Discord User ID 추출
 
         if (name == null) {
-            event.reply("❌ 제품 이름을 입력해주세요.").setEphemeral(true).queue();
+            replyError(event, "❌ 제품 이름을 입력해주세요.");
             return;
         }
 
-        // 사용자의 제품만 검색
+        event.deferReply(true).queue(null, e -> log.error("Discord Defer 실패: {}", e.getMessage()));
+        InteractionHook hook = event.getHook();
+        String userId = event.getUser().getId();
+
         List<Product> products = productRepository.findByDiscordUserIdAndName(userId, name);
 
         if (products.isEmpty()) {
-            event.reply("❌ 해당 이름의 제품을 찾을 수 없습니다.").setEphemeral(true).queue();
+            hook.editOriginal("❌ 해당 이름의 제품을 찾을 수 없습니다.").queue(null, e -> log.error("Discord 응답 실패: {}", e.getMessage()));
             return;
         }
 
         Product product = products.get(0);
-        productService.deleteProduct(product.getId());
+        try {
+            productService.deleteProduct(product.getId());
+        } catch (Exception e) {
+            log.error("제품 삭제 실패: {} - 사용자: {}", product.getName(), userId, e);
+            hook.editOriginal("❌ 제품 삭제 중 오류가 발생했습니다. 다시 시도해주세요.")
+                    .queue(null, ex -> log.error("Discord 응답 실패: {}", ex.getMessage()));
+            return;
+        }
         log.info("제품 삭제됨: {} ({}) - 사용자: {}", product.getName(), product.getUrl(), userId);
 
-        event.reply("✅ 제품이 삭제되었습니다: **" + product.getName() + "**").queue();
+        hook.editOriginal("✅ 제품이 삭제되었습니다: **" + product.getName() + "**").queue(null, e -> log.error("Discord 응답 실패: {}", e.getMessage()));
     }
 
-    /**
-     * 제품 목록 조회 명령어 처리
-     */
     private void handleListProducts(SlashCommandInteractionEvent event) {
-        String userId = event.getUser().getId();  // Discord User ID 추출
+        event.deferReply(true).queue(null, e -> log.error("Discord Defer 실패: {}", e.getMessage()));
+        InteractionHook hook = event.getHook();
 
-        // 사용자의 제품만 조회
+        String userId = event.getUser().getId();
         List<Product> products = productRepository.findByDiscordUserId(userId);
 
         if (products.isEmpty()) {
-            event.reply("📦 등록된 제품이 없습니다.").queue();
+            hook.editOriginal("📦 등록된 제품이 없습니다.").queue(null, e -> log.error("Discord 응답 실패: {}", e.getMessage()));
             return;
         }
 
@@ -474,11 +523,7 @@ public class DiscordCommandHandler extends ListenerAdapter {
         for (Product product : products) {
             String status = product.getActive() ? "✅ 활성" : "⏸️ 비활성";
             String priority = product.getPriority() == Product.Priority.URGENT ? "🔴 긴급" : "🟢 일반";
-            String stockStatus = switch (product.getCurrentStatus()) {
-                case IN_STOCK -> "💚 재고 있음";
-                case OUT_OF_STOCK -> "❤️ 품절";
-                case UNKNOWN -> "❓ 알 수 없음";
-            };
+            String stockStatus = DiscordConstants.formatStockStatus(product.getCurrentStatus());
 
             embed.addField(
                 product.getName(),
@@ -490,192 +535,200 @@ public class DiscordCommandHandler extends ListenerAdapter {
             );
         }
 
-        event.replyEmbeds(embed.build()).queue();
+        hook.editOriginalEmbeds(embed.build()).queue(null, e -> log.error("Discord 응답 실패: {}", e.getMessage()));
     }
 
-    /**
-     * 제품 활성화/비활성화 토글
-     */
     private void handleToggleProduct(SlashCommandInteractionEvent event) {
         String name = event.getOption("name", OptionMapping::getAsString);
-        String userId = event.getUser().getId();  // Discord User ID 추출
 
         if (name == null) {
-            event.reply("❌ 제품 이름을 입력해주세요.").setEphemeral(true).queue();
+            replyError(event, "❌ 제품 이름을 입력해주세요.");
             return;
         }
 
-        // 사용자의 제품만 검색
+        event.deferReply(true).queue(null, e -> log.error("Discord Defer 실패: {}", e.getMessage()));
+        InteractionHook hook = event.getHook();
+        String userId = event.getUser().getId();
+
         List<Product> products = productRepository.findByDiscordUserIdAndName(userId, name);
 
         if (products.isEmpty()) {
-            event.reply("❌ 해당 이름의 제품을 찾을 수 없습니다.").setEphemeral(true).queue();
+            hook.editOriginal("❌ 해당 이름의 제품을 찾을 수 없습니다.").queue(null, e -> log.error("Discord 응답 실패: {}", e.getMessage()));
             return;
         }
 
         Product product = products.get(0);
-        Product toggled = productService.toggleProductActive(product.getId());
+
+        Product toggled;
+        try {
+            toggled = productService.toggleProductActive(product.getId());
+        } catch (Exception e) {
+            log.error("제품 토글 실패: {}", product.getName(), e);
+            hook.editOriginal("❌ 제품을 찾을 수 없습니다.").queue(null, ex -> log.error("Discord 응답 실패: {}", ex.getMessage()));
+            return;
+        }
 
         String status = toggled.getActive() ? "✅ 활성화" : "⏸️ 비활성화";
-        event.reply(status + "되었습니다: **" + product.getName() + "**").queue();
+        hook.editOriginal(status + "되었습니다: **" + product.getName() + "**").queue(null, e -> log.error("Discord 응답 실패: {}", e.getMessage()));
     }
 
-    /**
-     * 제품 즉시 체크
-     */
     private void handleCheckProduct(SlashCommandInteractionEvent event) {
         String name = event.getOption("name", OptionMapping::getAsString);
-        String userId = event.getUser().getId();  // Discord User ID 추출
 
         if (name == null) {
-            event.reply("❌ 제품 이름을 입력해주세요.").setEphemeral(true).queue();
+            replyError(event, "❌ 제품 이름을 입력해주세요.");
             return;
         }
 
-        // 사용자의 제품만 검색
+        event.deferReply(true).queue(null, e -> log.error("Discord Defer 실패: {}", e.getMessage()));
+        InteractionHook hook = event.getHook();
+        String userId = event.getUser().getId();
+
         List<Product> products = productRepository.findByDiscordUserIdAndName(userId, name);
 
         if (products.isEmpty()) {
-            event.reply("❌ 해당 이름의 제품을 찾을 수 없습니다.").setEphemeral(true).queue();
+            hook.editOriginal("❌ 해당 이름의 제품을 찾을 수 없습니다.").queue(null, e -> log.error("Discord 응답 실패: {}", e.getMessage()));
             return;
         }
 
         Product product = products.get(0);
-
-        event.reply("🔍 제품을 확인 중입니다: **" + product.getName() + "**\n잠시만 기다려주세요...").queue();
 
         try {
             productMonitorService.checkProductNow(product.getId());
-
-            // 업데이트된 제품 정보 다시 조회
-            Product updated = productService.getProductById(product.getId()).orElse(product);
-            String stockStatus = switch (updated.getCurrentStatus()) {
-                case IN_STOCK -> "💚 재고 있음";
-                case OUT_OF_STOCK -> "❤️ 품절";
-                case UNKNOWN -> "❓ 알 수 없음";
-            };
-
-            EmbedBuilder embed = new EmbedBuilder()
-                    .setTitle("✅ 제품 확인 완료")
-                    .setColor(Color.GREEN)
-                    .addField("제품명", updated.getName(), false)
-                    .addField("재고 상태", stockStatus, true)
-                    .addField("가격", updated.getCurrentPrice() != null ? updated.getCurrentPrice() + "원" : "정보 없음", true)
-                    .setFooter("마지막 확인: " + updated.getLastCheckedAt());
-
-            event.getHook().sendMessageEmbeds(embed.build()).queue();
         } catch (Exception e) {
             log.error("제품 즉시 체크 실패: {}", product.getName(), e);
-            event.getHook().sendMessage("❌ 제품 확인 중 오류가 발생했습니다.").queue();
-        }
-    }
-
-    /**
-     * 제품 우선순위 설정
-     */
-    private void handleSetProductPriority(SlashCommandInteractionEvent event) {
-        String name = event.getOption("name", OptionMapping::getAsString);
-        String priorityStr = event.getOption("priority", OptionMapping::getAsString);
-        String userId = event.getUser().getId();  // Discord User ID 추출
-
-        if (name == null || priorityStr == null) {
-            event.reply("❌ 제품 이름과 우선순위를 모두 입력해주세요.").setEphemeral(true).queue();
+            hook.editOriginal("❌ 제품 확인 중 오류가 발생했습니다.").queue(null, ex -> log.error("Discord 응답 실패: {}", ex.getMessage()));
             return;
         }
 
-        // 우선순위 유효성 검사
+        // checkProductNow는 @Async라 즉시 반환. 재조회로 핸들러 시작 시점 스냅샷 대신 최신 커밋 값 표시
+        Product fresh = productRepository.findById(product.getId()).orElse(product);
+        String stockStatus = DiscordConstants.formatStockStatus(fresh.getCurrentStatus());
+
+        String lastChecked = fresh.getLastCheckedAt() != null
+                ? fresh.getLastCheckedAt().format(DiscordConstants.DISPLAY_FORMATTER)
+                : "확인 기록 없음";
+
+        EmbedBuilder embed = new EmbedBuilder()
+                .setTitle("🔍 체크 요청됨")
+                .setColor(Color.YELLOW)
+                .setDescription("백그라운드에서 재고 확인 요청이 접수되었습니다.")
+                .addField("제품명", fresh.getName(), false)
+                .addField("현재 상태 (이전 확인 기준)", stockStatus, true)
+                .addField("가격", fresh.getCurrentPrice() != null ? fresh.getCurrentPrice() + "원" : "정보 없음", true)
+                .setFooter("마지막 확인: " + lastChecked);
+
+        hook.editOriginalEmbeds(embed.build()).queue(null, e -> log.error("Discord 응답 실패: {}", e.getMessage()));
+    }
+
+    private void handleSetProductPriority(SlashCommandInteractionEvent event) {
+        String name = event.getOption("name", OptionMapping::getAsString);
+        String priorityStr = event.getOption("priority", OptionMapping::getAsString);
+
+        if (name == null || priorityStr == null) {
+            replyError(event, "❌ 제품 이름과 우선순위를 모두 입력해주세요.");
+            return;
+        }
+
         Product.Priority priority;
         try {
             priority = Product.Priority.valueOf(priorityStr.toUpperCase());
         } catch (IllegalArgumentException e) {
-            event.reply("❌ 우선순위는 URGENT 또는 NORMAL이어야 합니다.").setEphemeral(true).queue();
+            replyError(event, "❌ 우선순위는 URGENT 또는 NORMAL이어야 합니다.");
             return;
         }
 
-        // 사용자의 제품만 검색
+        event.deferReply(true).queue(null, e -> log.error("Discord Defer 실패: {}", e.getMessage()));
+        InteractionHook hook = event.getHook();
+        String userId = event.getUser().getId();
+
         List<Product> products = productRepository.findByDiscordUserIdAndName(userId, name);
 
         if (products.isEmpty()) {
-            event.reply("❌ 해당 이름의 제품을 찾을 수 없습니다.").setEphemeral(true).queue();
+            hook.editOriginal("❌ 해당 이름의 제품을 찾을 수 없습니다.").queue(null, e -> log.error("Discord 응답 실패: {}", e.getMessage()));
             return;
         }
 
         Product product = products.get(0);
         productService.setProductPriority(product.getId(), priority);
 
-        String priorityText = priority == Product.Priority.URGENT ? "🔴 긴급 (30초 주기)" : "🟢 일반 (60초 주기)";
-        event.reply("✅ 우선순위가 변경되었습니다: **" + product.getName() + "** → " + priorityText).queue();
+        String priorityText = priority == Product.Priority.URGENT ? "🔴 긴급 (10초 주기)" : "🟢 일반 (60초 주기)";
+        hook.editOriginal("✅ 우선순위가 변경되었습니다: **" + product.getName() + "** → " + priorityText).queue(null, e -> log.error("Discord 응답 실패: {}", e.getMessage()));
     }
 
-    /**
-     * 제품 체크 주기 설정
-     */
     private void handleSetProductInterval(SlashCommandInteractionEvent event) {
         String name = event.getOption("name", OptionMapping::getAsString);
         Integer interval = event.getOption("interval", OptionMapping::getAsInt);
-        String userId = event.getUser().getId();  // Discord User ID 추출
 
         if (name == null || interval == null) {
-            event.reply("❌ 제품 이름과 체크 주기를 모두 입력해주세요.").setEphemeral(true).queue();
+            replyError(event, "❌ 제품 이름과 체크 주기를 모두 입력해주세요.");
             return;
         }
 
         if (interval < 1) {
-            event.reply("❌ 체크 주기는 최소 1분이어야 합니다.").setEphemeral(true).queue();
+            replyError(event, "❌ 체크 주기는 최소 1분이어야 합니다.");
             return;
         }
 
-        // 사용자의 제품만 검색
+        event.deferReply(true).queue(null, e -> log.error("Discord Defer 실패: {}", e.getMessage()));
+        InteractionHook hook = event.getHook();
+        String userId = event.getUser().getId();
+
         List<Product> products = productRepository.findByDiscordUserIdAndName(userId, name);
 
         if (products.isEmpty()) {
-            event.reply("❌ 해당 이름의 제품을 찾을 수 없습니다.").setEphemeral(true).queue();
+            hook.editOriginal("❌ 해당 이름의 제품을 찾을 수 없습니다.").queue(null, e -> log.error("Discord 응답 실패: {}", e.getMessage()));
             return;
         }
 
         Product product = products.get(0);
         productService.setProductCheckInterval(product.getId(), interval);
 
-        event.reply("✅ 체크 주기가 변경되었습니다: **" + product.getName() + "** → " + interval + "분").queue();
+        hook.editOriginal("✅ 체크 주기가 변경되었습니다: **" + product.getName() + "** → " + interval + "분").queue(null, e -> log.error("Discord 응답 실패: {}", e.getMessage()));
     }
 
-    /**
-     * 사이트 체크 주기 설정
-     */
     private void handleSetSiteInterval(SlashCommandInteractionEvent event) {
         String name = event.getOption("name", OptionMapping::getAsString);
         Integer interval = event.getOption("interval", OptionMapping::getAsInt);
-        String userId = event.getUser().getId();  // Discord User ID 추출
 
         if (name == null || interval == null) {
-            event.reply("❌ 사이트 이름과 체크 주기를 모두 입력해주세요.").setEphemeral(true).queue();
+            replyError(event, "❌ 사이트 이름과 체크 주기를 모두 입력해주세요.");
             return;
         }
 
         if (interval < 1) {
-            event.reply("❌ 체크 주기는 최소 1분이어야 합니다.").setEphemeral(true).queue();
+            replyError(event, "❌ 체크 주기는 최소 1분이어야 합니다.");
             return;
         }
 
-        // 사용자의 사이트만 검색
+        event.deferReply(true).queue(null, e -> log.error("Discord Defer 실패: {}", e.getMessage()));
+        InteractionHook hook = event.getHook();
+        String userId = event.getUser().getId();
+
         List<Site> sites = siteRepository.findByDiscordUserIdAndName(userId, name);
 
         if (sites.isEmpty()) {
-            event.reply("❌ 해당 이름의 사이트를 찾을 수 없습니다.").setEphemeral(true).queue();
+            hook.editOriginal("❌ 해당 이름의 사이트를 찾을 수 없습니다.").queue(null, e -> log.error("Discord 응답 실패: {}", e.getMessage()));
             return;
         }
 
         Site site = sites.get(0);
         site.setCheckIntervalMinutes(interval);
-        siteRepository.save(site);
-
-        event.reply("✅ 체크 주기가 변경되었습니다: **" + site.getName() + "** → " + interval + "분").queue();
+        try {
+            siteRepository.save(site);
+        } catch (Exception e) {
+            log.error("사이트 체크 주기 변경 실패: {} - 사용자: {}", site.getName(), userId, e);
+            hook.editOriginal("❌ 체크 주기 변경 중 오류가 발생했습니다. 다시 시도해주세요.")
+                    .queue(null, ex -> log.error("Discord 응답 실패: {}", ex.getMessage()));
+            return;
+        }
+        hook.editOriginal("✅ 체크 주기가 변경되었습니다: **" + site.getName() + "** → " + interval + "분").queue(null, e -> log.error("Discord 응답 실패: {}", e.getMessage()));
     }
 
-    /**
-     * 도움말 명령어 처리
-     */
     private void handleHelp(SlashCommandInteractionEvent event) {
+        event.deferReply(true).queue(null, e -> log.error("Discord Defer 실패: {}", e.getMessage()));
+        InteractionHook hook = event.getHook();
+
         String category = event.getOption("category", "all", OptionMapping::getAsString);
 
         EmbedBuilder embed = new EmbedBuilder()
@@ -684,7 +737,7 @@ public class DiscordCommandHandler extends ListenerAdapter {
 
         if (category.equals("all") || category.equals("site")) {
             embed.addField("🌐 사이트 관리",
-                "• `/add <url> <name>` - 사이트 추가\n" +
+                "• `/add <url> <name> [keyword]` - 사이트 추가 (keyword 없으면 전체글 알림)\n" +
                 "• `/remove <name>` - 사이트 삭제\n" +
                 "• `/list` - 사이트 목록\n" +
                 "• `/toggle <name>` - 사이트 활성화/비활성화\n" +
@@ -695,7 +748,7 @@ public class DiscordCommandHandler extends ListenerAdapter {
 
         if (category.equals("all") || category.equals("keyword")) {
             embed.addField("🔍 키워드 관리",
-                "• `/keyword-add <site> <keyword>` - 키워드 추가\n" +
+                "• `/keyword-add <site> <keyword>` - 기존 사이트에 키워드 추가\n" +
                 "• `/keyword-remove <site> <keyword>` - 키워드 삭제\n" +
                 "• `/keyword-list <site>` - 키워드 목록",
                 false
@@ -723,24 +776,24 @@ public class DiscordCommandHandler extends ListenerAdapter {
             );
         }
 
-        embed.setFooter("우선순위: URGENT (30초 주기) / NORMAL (60초 주기)");
+        embed.setFooter("우선순위: URGENT (10초 주기) / NORMAL (60초 주기)");
 
-        event.replyEmbeds(embed.build()).queue();
+        hook.editOriginalEmbeds(embed.build()).queue(null, e -> log.error("Discord 응답 실패: {}", e.getMessage()));
     }
 
-    /**
-     * CSS 셀렉터 유효성 검증
-     */
+    private void replyError(SlashCommandInteractionEvent event, String message) {
+        event.reply(message).setEphemeral(true)
+                .queue(null, e -> log.error("Discord 응답 실패: {}", e.getMessage()));
+    }
+
     private boolean isValidCssSelector(String selector) {
-        if (selector == null || selector.trim().isEmpty()) {
+        if (selector == null || selector.strip().isEmpty()) {
             return false;
         }
 
         try {
-            // Jsoup의 셀렉터 파서로 검증
-            // 임시 HTML로 테스트
             org.jsoup.nodes.Document testDoc = org.jsoup.Jsoup.parse("<html><body></body></html>");
-            testDoc.select(selector);  // 잘못된 셀렉터면 Exception 발생
+            testDoc.select(selector);
             return true;
         } catch (Exception e) {
             log.debug("셀렉터 검증 실패: {}", selector, e);

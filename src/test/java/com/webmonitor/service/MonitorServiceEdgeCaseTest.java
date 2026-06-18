@@ -11,7 +11,6 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
-import org.springframework.transaction.annotation.Transactional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -20,7 +19,6 @@ import static org.assertj.core.api.Assertions.assertThat;
  * 경계값, 예외 상황, 특수 케이스 검증
  */
 @SpringBootTest
-@Transactional
 class MonitorServiceEdgeCaseTest {
 
     @Autowired
@@ -35,6 +33,9 @@ class MonitorServiceEdgeCaseTest {
     @Autowired
     private AlertRepository alertRepository;
 
+    @Autowired
+    private AlertService alertService;
+
     @MockBean
     private SseService sseService;
 
@@ -43,9 +44,11 @@ class MonitorServiceEdgeCaseTest {
 
     @BeforeEach
     void setUp() {
-        alertRepository.deleteAll();
-        keywordRepository.deleteAll();
-        siteRepository.deleteAll();
+        // deleteAll()은 엔티티 로드 후 버전 체크를 수행 — 백그라운드 스케줄러가 @Version을 변경하면
+        // OptimisticLockingFailure 발생. deleteAllInBatch()는 단일 DELETE SQL로 버전 체크 우회.
+        alertRepository.deleteAllInBatch();
+        keywordRepository.deleteAllInBatch();
+        siteRepository.deleteAllInBatch();
     }
 
     @Test
@@ -200,12 +203,16 @@ class MonitorServiceEdgeCaseTest {
         String pageTitle = "테스트";
         String url = "https://example.com";
 
-        // 여러 번 호출하여 알림 생성
+        // 여러 번 호출하여 알림 생성 (인라인 제한 없음 — 스케줄러가 별도 정리)
         for (int i = 0; i < 60; i++) {
             monitorService.detectKeywords(site, pageText + i, pageTitle, url);
         }
+        assertThat(alertRepository.countBySite(site)).isEqualTo(60);
 
-        // Then: 알림 개수가 maxAlertsPerSite(50) 이하로 제한되어야 함
+        // When: 스케줄러 정리 시뮬레이션
+        alertService.cleanupAllExcessAlerts(50);
+
+        // Then: 알림 개수가 maxAlertsPerSite(50) 이하로 제한됨
         long alertCount = alertRepository.countBySite(site);
         assertThat(alertCount).isLessThanOrEqualTo(50);
     }

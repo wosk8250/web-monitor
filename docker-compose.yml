@@ -1,6 +1,23 @@
 version: '3.8'
 
 services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: web-monitor-db
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB:-webmonitor}
+      - POSTGRES_USER=${POSTGRES_USER:-webmonitor}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-webmonitor}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
   web-monitor:
     build:
       context: .
@@ -8,12 +25,20 @@ services:
     container_name: web-monitor-app
     ports:
       - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
     environment:
       # Spring Profile
       - SPRING_PROFILES_ACTIVE=prod
 
-      # Database Configuration
-      - SPRING_DATASOURCE_URL=jdbc:h2:file:/app/data/monitor;AUTO_SERVER=TRUE
+      # Database Configuration (PostgreSQL)
+      # DB_HOST는 Docker Compose 내부 서비스명 사용
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=${POSTGRES_DB:-webmonitor}
+      - DB_USERNAME=${POSTGRES_USER:-webmonitor}
+      - DB_PASSWORD=${POSTGRES_PASSWORD:-webmonitor}
 
       # Discord Configuration (환경 변수로 설정)
       - DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN:-}
@@ -32,10 +57,6 @@ services:
       # Alert Cleanup
       - ALERT_CLEANUP_ENABLED=true
       - ALERT_CLEANUP_DAYS=30
-
-    volumes:
-      # Persist H2 database
-      - ./data:/app/data
 
     restart: unless-stopped
 
@@ -57,5 +78,4 @@ services:
           memory: 512M
 
 volumes:
-  monitor-data:
-    driver: local
+  postgres_data:

@@ -79,4 +79,16 @@ public final class WebCrawlerConstants {
      * Rate Limiting 기본 대기 시간 (밀리초)
      */
     public static final long DEFAULT_RATE_LIMIT_MS = 1000;  // 1초
+
+    /**
+     * 응답 본문 최대 크기 (바이트) — 웹 모니터링용
+     * 무제한 허용 시 대용량 페이지로 인한 OOM 방지
+     */
+    public static final int MAX_BODY_SIZE_BYTES = 5 * 1024 * 1024;  // 5MB
+
+    /**
+     * 응답 본문 최대 크기 (바이트) — 제품 페이지 모니터링용
+     * 제품 페이지는 상대적으로 가벼우므로 더 엄격한 제한 적용
+     */
+    public static final int PRODUCT_MAX_BODY_SIZE_BYTES = 1024 * 1024;  // 1MB
 }

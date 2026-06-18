@@ -15,6 +15,7 @@ public class MonitoringProperties {
     private RateLimitProperties rateLimit = new RateLimitProperties();
     private FailureProperties failure = new FailureProperties();
     private RestockProperties restock = new RestockProperties();
+    private ContentChangeProperties contentChange = new ContentChangeProperties();
 
     /**
      * Rate Limiting 설정
@@ -55,6 +56,17 @@ public class MonitoringProperties {
     public static class RestockProperties {
         /**
          * 재입고 알림 쿨다운 (분)
+         */
+        private int alertCooldownMinutes = 60;
+    }
+
+    /**
+     * 콘텐츠 변경 알림 설정
+     */
+    @Data
+    public static class ContentChangeProperties {
+        /**
+         * 콘텐츠 변경 알림 쿨다운 (분)
          */
         private int alertCooldownMinutes = 60;
     }

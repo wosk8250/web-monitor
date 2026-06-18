@@ -64,4 +64,16 @@ public interface KeywordRepository extends JpaRepository<Keyword, Long> {
      */
     @Cacheable(value = "globalKeywords")
     List<Keyword> findBySiteIsNull();
+
+    /**
+     * 전체 공통 키워드 중 활성화된 것만 조회 (site가 null + active)
+     * findByActive(true).stream().filter(k -> k.getSite() == null) 패턴 대체용
+     * @param active 활성화 여부
+     * @return 활성화된 전체 공통 키워드 목록
+     */
+    List<Keyword> findBySiteIsNullAndActive(Boolean active);
+
+    List<Keyword> findBySiteIn(List<Site> sites);
+
+    long countBySiteIn(List<Site> sites);
 }

@@ -196,6 +196,56 @@ public class AsyncConfig implements AsyncConfigurer {
     }
 
     /**
+     * 사이트 모니터링 병렬 실행용 Thread Pool
+     * 사이트 크롤링은 I/O bound — 동시에 여러 사이트를 크롤링해 순차 루프 병목 해소
+     */
+    @Bean(name = "siteMonitorExecutor")
+    public Executor siteMonitorExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(5);
+        executor.setMaxPoolSize(20);
+        executor.setQueueCapacity(50);
+
+        executor.setRejectedExecutionHandler((runnable, exec) -> {
+            log.warn("SiteMonitor Thread Pool 큐 초과 - 작업 거부됨 (Pool: {}, Queue: {}/{})",
+                    exec.getActiveCount(), exec.getQueue().size(), executor.getQueueCapacity());
+            eventPublisher.publishEvent(new CriticalErrorEvent(
+                    this, "ThreadPoolRejection", "AsyncConfig.siteMonitorExecutor"));
+        });
+
+        executor.setThreadFactory(r -> {
+            Thread thread = new Thread(r);
+            thread.setName("SiteMonitor-" + thread.getId());
+            thread.setUncaughtExceptionHandler((t, e) -> {
+                log.error("==================================================");
+                log.error("SiteMonitor Thread Pool에서 Uncaught Exception 발생!");
+                log.error("Thread: {}", t.getName());
+                log.error("Exception 타입: {}", e.getClass().getName());
+                log.error("Exception 메시지: {}", e.getMessage());
+                log.error("Stack Trace:", e);
+                log.error("==================================================");
+                metricsService.incrementExceptionCounter(
+                        e.getClass().getSimpleName(), "AsyncConfig.siteMonitorExecutor");
+            });
+            return thread;
+        });
+
+        executor.setWaitForTasksToCompleteOnShutdown(true);
+        executor.setAwaitTerminationSeconds(30);
+        executor.initialize();
+
+        ThreadPoolExecutor threadPoolExecutor = executor.getThreadPoolExecutor();
+        metricsService.registerThreadPoolActiveThreadsGauge("siteMonitor", threadPoolExecutor);
+        metricsService.registerThreadPoolQueueSizeGauge("siteMonitor", threadPoolExecutor);
+        metricsService.registerThreadPoolCompletedTasksGauge("siteMonitor", threadPoolExecutor);
+
+        log.info("SiteMonitor Thread Pool 초기화 완료 (Core: {}, Max: {}, Queue: {})",
+                executor.getCorePoolSize(), executor.getMaxPoolSize(), executor.getQueueCapacity());
+
+        return executor;
+    }
+
+    /**
      * @Async 메서드에서 발생한 미처리 예외 핸들러
      * 비동기 메서드에서 발생한 예외는 호출자에게 전파되지 않으므로 여기서 로깅
      */

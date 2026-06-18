@@ -2,6 +2,7 @@ package com.webmonitor.service;
 
 import com.webmonitor.domain.Alert;
 import com.webmonitor.domain.Keyword;
+import com.webmonitor.exception.resource.AlertNotFoundException;
 import com.webmonitor.domain.Product;
 import com.webmonitor.domain.Product.StockStatus;
 import com.webmonitor.domain.Site;
@@ -21,7 +22,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.List;
-import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -170,24 +170,22 @@ class AlertServiceTest {
     @DisplayName("ID로 알림 조회 성공")
     void getAlertById_Success() {
         // When
-        Optional<Alert> found = alertService.getAlertById(testAlert.getId());
+        Alert found = alertService.getAlertById(testAlert.getId());
 
         // Then
-        assertThat(found).isPresent();
-        assertThat(found.get().getMessage()).isEqualTo("키워드 감지됨");
+        assertThat(found).isNotNull();
+        assertThat(found.getMessage()).isEqualTo("키워드 감지됨");
     }
 
     @Test
-    @DisplayName("존재하지 않는 ID로 조회 시 빈 Optional 반환")
-    void getAlertById_NotFound_ReturnsEmpty() {
+    @DisplayName("존재하지 않는 ID로 조회 시 AlertNotFoundException 발생")
+    void getAlertById_NotFound_ThrowsAlertNotFoundException() {
         // Given
         Long nonExistentId = 99999L;
 
-        // When
-        Optional<Alert> found = alertService.getAlertById(nonExistentId);
-
-        // Then
-        assertThat(found).isEmpty();
+        // When & Then
+        assertThatThrownBy(() -> alertService.getAlertById(nonExistentId))
+                .isInstanceOf(com.webmonitor.exception.resource.AlertNotFoundException.class);
     }
 
     @Test
@@ -385,7 +383,7 @@ class AlertServiceTest {
 
         // When & Then
         assertThatThrownBy(() -> alertService.markAsSent(nonExistentId))
-                .isInstanceOf(IllegalArgumentException.class)
+                .isInstanceOf(AlertNotFoundException.class)
                 .hasMessageContaining("알림을 찾을 수 없습니다");
     }
 
@@ -408,7 +406,7 @@ class AlertServiceTest {
 
         // When & Then
         assertThatThrownBy(() -> alertService.deleteAlert(nonExistentId))
-                .isInstanceOf(IllegalArgumentException.class)
+                .isInstanceOf(AlertNotFoundException.class)
                 .hasMessageContaining("알림을 찾을 수 없습니다");
     }
 
@@ -601,5 +599,48 @@ class AlertServiceTest {
         // Then
         Alert found = alertRepository.findById(testAlert.getId()).orElseThrow();
         assertThat(found.getRetryCount()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("cleanupAllExcessAlerts - 초과 사이트 알림 정리")
+    void cleanupAllExcessAlerts_removesOldestAlertsOverLimit() {
+        // Given: setUp의 testAlert(1개) + 3개 추가 = 총 4개, max=2
+        for (int i = 0; i < 3; i++) {
+            Alert a = Alert.builder()
+                    .site(testSite)
+                    .keyword(testKeyword)
+                    .alertType(Alert.AlertType.KEYWORD)
+                    .message("알림 " + i)
+                    .detectedUrl("https://test.com/page/" + i)
+                    .build();
+            alertRepository.save(a);
+        }
+        assertThat(alertRepository.countBySite(testSite)).isEqualTo(4);
+
+        // When
+        alertService.cleanupAllExcessAlerts(2);
+
+        // Then
+        assertThat(alertRepository.countBySite(testSite)).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("cleanupAllExcessAlerts - 초과 없으면 삭제 안 함")
+    void cleanupAllExcessAlerts_noExcess_noDelete() {
+        // Given: setUp의 testAlert(1개) + 1개 추가 = 총 2개, max=3 → 초과 없음
+        alertRepository.save(Alert.builder()
+                .site(testSite)
+                .keyword(testKeyword)
+                .alertType(Alert.AlertType.KEYWORD)
+                .message("알림")
+                .detectedUrl("https://test.com/page/extra")
+                .build());
+        assertThat(alertRepository.countBySite(testSite)).isEqualTo(2);
+
+        // When
+        alertService.cleanupAllExcessAlerts(3);
+
+        // Then
+        assertThat(alertRepository.countBySite(testSite)).isEqualTo(2);
     }
 }

@@ -10,8 +10,8 @@ import net.dv8tion.jda.api.JDA;
 import net.dv8tion.jda.api.JDABuilder;
 import net.dv8tion.jda.api.interactions.commands.OptionType;
 import net.dv8tion.jda.api.interactions.commands.build.Commands;
-import net.dv8tion.jda.api.requests.GatewayIntent;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
 
 /**
  * 디스코드 봇 서비스
@@ -32,29 +32,27 @@ public class DiscordBotService {
             return;
         }
 
-        if (botConfig.getToken() == null || botConfig.getToken().isEmpty()) {
-            log.warn("디스코드 봇 토큰이 설정되지 않았습니다.");
-            return;
+        if (!StringUtils.hasText(botConfig.getToken())) {
+            throw new IllegalStateException(
+                "DISCORD_BOT_ENABLED=true이지만 DISCORD_BOT_TOKEN이 설정되지 않았습니다. " +
+                "환경변수 DISCORD_BOT_TOKEN을 설정하거나 DISCORD_BOT_ENABLED=false로 변경하세요."
+            );
         }
 
         try {
             log.info("디스코드 봇 초기화 중...");
 
-            // JDA 빌더 생성 및 설정
             jda = JDABuilder.createDefault(botConfig.getToken())
-                    .enableIntents(GatewayIntent.GUILD_MESSAGES, GatewayIntent.MESSAGE_CONTENT)
                     .addEventListeners(commandHandler)
                     .build();
 
-            // 봇이 준비될 때까지 대기
             jda.awaitReady();
-
-            // Slash Commands 등록
             registerCommands();
 
             log.info("디스코드 봇이 성공적으로 시작되었습니다.");
         } catch (Exception e) {
             log.error("디스코드 봇 초기화 실패", e);
+            jda = null;
         }
     }
 
@@ -67,7 +65,8 @@ public class DiscordBotService {
                     // 사이트 추가
                     Commands.slash("add", "모니터링할 사이트를 추가합니다")
                             .addOption(OptionType.STRING, "url", "사이트 URL", true)
-                            .addOption(OptionType.STRING, "name", "사이트 이름", true),
+                            .addOption(OptionType.STRING, "name", "사이트 이름", true)
+                            .addOption(OptionType.STRING, "keyword", "키워드 (없으면 전체글 알림)", false),
 
                     // 사이트 삭제
                     Commands.slash("remove", "모니터링 사이트를 삭제합니다")
@@ -81,9 +80,9 @@ public class DiscordBotService {
                             .addOption(OptionType.STRING, "name", "사이트 이름", true),
 
                     // 키워드 추가
-                    Commands.slash("keyword-add", "사이트에 모니터링할 키워드를 추가합니다")
+                    Commands.slash("keyword-add", "기존 사이트에 키워드를 추가합니다")
                             .addOption(OptionType.STRING, "site", "사이트 이름", true)
-                            .addOption(OptionType.STRING, "keyword", "키워드", true),
+                            .addOption(OptionType.STRING, "keyword", "추가할 키워드", true),
 
                     // 키워드 삭제
                     Commands.slash("keyword-remove", "사이트의 키워드를 삭제합니다")

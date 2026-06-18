@@ -24,10 +24,10 @@ class ProductMonitorSchedulerTest {
     private ProductMonitorScheduler productMonitorScheduler;
 
     @Test
-    @DisplayName("긴급 제품 모니터링(30초) 정상 실행 - URGENT 우선순위 제품 모니터링")
+    @DisplayName("긴급 제품 모니터링(10초) 정상 실행 - URGENT 우선순위 제품 모니터링")
     void monitorUrgentProducts_정상실행_URGENT우선순위제품모니터링() {
         // When: 긴급 제품 모니터링 스케줄러 실행
-        productMonitorScheduler.monitorUrgentProductsEvery30Seconds();
+        productMonitorScheduler.monitorUrgentProductsEvery10Seconds();
 
         // Then: ProductMonitorService.monitorUrgentProducts() 호출 확인
         verify(productMonitorService, times(1)).monitorUrgentProducts();
@@ -41,7 +41,7 @@ class ProductMonitorSchedulerTest {
                 .when(productMonitorService).monitorUrgentProducts();
 
         // When: 스케줄러 메서드 호출
-        productMonitorScheduler.monitorUrgentProductsEvery30Seconds();
+        productMonitorScheduler.monitorUrgentProductsEvery10Seconds();
 
         // Then: 예외가 발생해도 스케줄러는 계속 동작해야 함
         verify(productMonitorService, times(1)).monitorUrgentProducts();

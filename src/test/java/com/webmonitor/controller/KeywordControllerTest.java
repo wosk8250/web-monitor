@@ -12,15 +12,13 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.client.TestRestTemplate;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.transaction.annotation.Transactional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/**
- * KeywordController 통합 테스트
- */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 class KeywordControllerTest {
 
@@ -37,11 +35,9 @@ class KeywordControllerTest {
 
     @BeforeEach
     void setUp() {
-        // 테스트 데이터 초기화
         keywordRepository.deleteAll();
         siteRepository.deleteAll();
 
-        // 테스트용 사이트 생성 및 저장
         testSite = Site.builder()
                 .name("테스트 사이트")
                 .url("https://test.com")
@@ -54,21 +50,18 @@ class KeywordControllerTest {
     @Test
     @DisplayName("키워드 등록 - 정상 케이스 (siteId 지정)")
     void createKeyword_WithSiteId_Success() {
-        // Given
         KeywordRequest request = KeywordRequest.builder()
                 .keyword("테스트 키워드")
                 .siteId(testSite.getId())
                 .active(true)
                 .build();
 
-        // When
         ResponseEntity<KeywordResponse> response = restTemplate.postForEntity(
                 "/api/keywords",
                 request,
                 KeywordResponse.class
         );
 
-        // Then
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CREATED);
         assertThat(response.getBody()).isNotNull();
         assertThat(response.getBody().getKeyword()).isEqualTo("테스트 키워드");
@@ -76,28 +69,24 @@ class KeywordControllerTest {
         assertThat(response.getBody().getSiteName()).isEqualTo("테스트 사이트");
         assertThat(response.getBody().getActive()).isTrue();
 
-        // DB 확인
         assertThat(keywordRepository.count()).isEqualTo(1);
     }
 
     @Test
     @DisplayName("키워드 등록 - 정상 케이스 (전체 공통 키워드, siteId null)")
     void createKeyword_WithoutSiteId_Success() {
-        // Given
         KeywordRequest request = KeywordRequest.builder()
                 .keyword("공통 키워드")
-                .siteId(null)  // 전체 공통 키워드
+                .siteId(null)
                 .active(true)
                 .build();
 
-        // When
         ResponseEntity<KeywordResponse> response = restTemplate.postForEntity(
                 "/api/keywords",
                 request,
                 KeywordResponse.class
         );
 
-        // Then
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CREATED);
         assertThat(response.getBody()).isNotNull();
         assertThat(response.getBody().getKeyword()).isEqualTo("공통 키워드");
@@ -105,7 +94,6 @@ class KeywordControllerTest {
         assertThat(response.getBody().getSiteName()).isEqualTo("전체 공통");
         assertThat(response.getBody().getActive()).isTrue();
 
-        // DB 확인
         Keyword savedKeyword = keywordRepository.findAll().get(0);
         assertThat(savedKeyword.getSite()).isNull();
     }
@@ -113,54 +101,46 @@ class KeywordControllerTest {
     @Test
     @DisplayName("공백 키워드 등록 → 새글 감지 자동 활성화")
     void createKeyword_WithEmptyKeyword_EnablesContentDetection() {
-        // Given: detectContentChange=false인 사이트
         testSite.setDetectContentChange(false);
         testSite = siteRepository.save(testSite);
 
         KeywordRequest request = KeywordRequest.builder()
-                .keyword("")  // 빈 문자열 → 새글 감지 활성화
+                .keyword("")
                 .siteId(testSite.getId())
                 .active(true)
                 .build();
 
-        // When
         ResponseEntity<java.util.Map> response = restTemplate.postForEntity(
                 "/api/keywords",
                 request,
                 java.util.Map.class
         );
 
-        // Then
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(response.getBody()).containsKey("message");
         assertThat(response.getBody().get("message")).isEqualTo("새글 감지 기능이 활성화되었습니다");
 
-        // DB 확인: Site의 detectContentChange가 true로 변경됨
         Site updatedSite = siteRepository.findById(testSite.getId()).orElseThrow();
         assertThat(updatedSite.getDetectContentChange()).isTrue();
 
-        // 키워드는 저장되지 않음
         assertThat(keywordRepository.count()).isZero();
     }
 
     @Test
     @DisplayName("공백 키워드 등록 - 실패 (siteId null)")
     void createKeyword_WithEmptyKeywordAndNullSiteId_Fail() {
-        // Given: 공백 키워드는 특정 사이트에만 허용
         KeywordRequest request = KeywordRequest.builder()
-                .keyword("")  // 빈 문자열
-                .siteId(null)  // 전체 공통 키워드로는 불가
+                .keyword("")
+                .siteId(null)
                 .active(true)
                 .build();
 
-        // When
         ResponseEntity<java.util.Map> response = restTemplate.postForEntity(
                 "/api/keywords",
                 request,
                 java.util.Map.class
         );
 
-        // Then
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
         assertThat(response.getBody()).containsKey("error");
         assertThat(keywordRepository.count()).isZero();
@@ -169,21 +149,18 @@ class KeywordControllerTest {
     @Test
     @DisplayName("키워드 등록 - 실패 (keyword가 null)")
     void createKeyword_WithNullKeyword_Fail() {
-        // Given
         KeywordRequest request = KeywordRequest.builder()
-                .keyword(null)  // null
+                .keyword(null)
                 .siteId(testSite.getId())
                 .active(true)
                 .build();
 
-        // When
         ResponseEntity<KeywordResponse> response = restTemplate.postForEntity(
                 "/api/keywords",
                 request,
                 KeywordResponse.class
         );
 
-        // Then
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
         assertThat(keywordRepository.count()).isZero();
     }
@@ -191,29 +168,25 @@ class KeywordControllerTest {
     @Test
     @DisplayName("키워드 등록 - 실패 (존재하지 않는 siteId)")
     void createKeyword_WithNonExistentSiteId_Fail() {
-        // Given
         KeywordRequest request = KeywordRequest.builder()
                 .keyword("테스트 키워드")
-                .siteId(99999L)  // 존재하지 않는 siteId
+                .siteId(99999L)
                 .active(true)
                 .build();
 
-        // When
         ResponseEntity<KeywordResponse> response = restTemplate.postForEntity(
                 "/api/keywords",
                 request,
                 KeywordResponse.class
         );
 
-        // Then
-        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
         assertThat(keywordRepository.count()).isZero();
     }
 
     @Test
-    @DisplayName("키워드 수정 - 정상 케이스")
+    @DisplayName("PATCH /api/keywords/{id} - 키워드 수정 정상 케이스")
     void updateKeyword_Success() {
-        // Given
         Keyword keyword = Keyword.builder()
                 .keyword("원래 키워드")
                 .site(testSite)
@@ -227,10 +200,13 @@ class KeywordControllerTest {
                 .active(false)
                 .build();
 
-        // When
-        restTemplate.put("/api/keywords/" + keyword.getId(), updateRequest);
+        ResponseEntity<KeywordResponse> response = restTemplate.exchange(
+                "/api/keywords/" + keyword.getId(),
+                HttpMethod.PATCH,
+                new HttpEntity<>(updateRequest),
+                KeywordResponse.class);
 
-        // Then
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
         Keyword updatedKeyword = keywordRepository.findById(keyword.getId()).orElseThrow();
         assertThat(updatedKeyword.getKeyword()).isEqualTo("수정된 키워드");
         assertThat(updatedKeyword.getActive()).isFalse();
@@ -239,7 +215,6 @@ class KeywordControllerTest {
     @Test
     @DisplayName("키워드 삭제 - 정상 케이스")
     void deleteKeyword_Success() {
-        // Given
         Keyword keyword = Keyword.builder()
                 .keyword("삭제될 키워드")
                 .site(testSite)
@@ -247,17 +222,14 @@ class KeywordControllerTest {
                 .build();
         keyword = keywordRepository.save(keyword);
 
-        // When
         restTemplate.delete("/api/keywords/" + keyword.getId());
 
-        // Then
         assertThat(keywordRepository.existsById(keyword.getId())).isFalse();
     }
 
     @Test
-    @DisplayName("키워드 활성화 토글 - 정상 케이스")
-    void toggleKeywordActive_Success() {
-        // Given
+    @DisplayName("PATCH /api/keywords/{id} - active=false로 비활성화")
+    void patchKeywordActive_setFalse_Success() {
         Keyword keyword = Keyword.builder()
                 .keyword("토글 테스트")
                 .site(testSite)
@@ -265,30 +237,27 @@ class KeywordControllerTest {
                 .build();
         keyword = keywordRepository.save(keyword);
 
-        // When
+        KeywordRequest patch = KeywordRequest.builder().active(false).build();
         ResponseEntity<KeywordResponse> response = restTemplate.exchange(
-                "/api/keywords/" + keyword.getId() + "/toggle",
-                org.springframework.http.HttpMethod.PATCH,
-                null,
+                "/api/keywords/" + keyword.getId(),
+                HttpMethod.PATCH,
+                new HttpEntity<>(patch),
                 KeywordResponse.class
         );
 
-        // Then
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(response.getBody().getActive()).isFalse();
 
-        // DB 확인
-        Keyword toggledKeyword = keywordRepository.findById(keyword.getId()).orElseThrow();
-        assertThat(toggledKeyword.getActive()).isFalse();
+        Keyword updated = keywordRepository.findById(keyword.getId()).orElseThrow();
+        assertThat(updated.getActive()).isFalse();
     }
 
     @Test
-    @DisplayName("전체 공통 키워드 조회")
+    @DisplayName("GET /api/keywords?global=true - 전체 공통 키워드 조회")
     void getGlobalKeywords_Success() {
-        // Given
         Keyword globalKeyword = Keyword.builder()
                 .keyword("전체 공통 키워드")
-                .site(null)  // 전체 공통
+                .site(null)
                 .active(true)
                 .build();
         keywordRepository.save(globalKeyword);
@@ -300,13 +269,11 @@ class KeywordControllerTest {
                 .build();
         keywordRepository.save(siteKeyword);
 
-        // When
         ResponseEntity<KeywordResponse[]> response = restTemplate.getForEntity(
-                "/api/keywords/global",
+                "/api/keywords?global=true",
                 KeywordResponse[].class
         );
 
-        // Then
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(response.getBody()).hasSize(1);
         assertThat(response.getBody()[0].getKeyword()).isEqualTo("전체 공통 키워드");
@@ -314,9 +281,8 @@ class KeywordControllerTest {
     }
 
     @Test
-    @DisplayName("사이트별 키워드 조회")
+    @DisplayName("GET /api/sites/{siteId}/keywords - 사이트별 키워드 조회")
     void getKeywordsBySite_Success() {
-        // Given
         Keyword keyword1 = Keyword.builder()
                 .keyword("사이트 키워드 1")
                 .site(testSite)
@@ -338,40 +304,83 @@ class KeywordControllerTest {
                 .build();
         keywordRepository.save(globalKeyword);
 
-        // When
         ResponseEntity<KeywordResponse[]> response = restTemplate.getForEntity(
-                "/api/keywords/site/" + testSite.getId(),
+                "/api/sites/" + testSite.getId() + "/keywords",
                 KeywordResponse[].class
         );
 
-        // Then
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(response.getBody()).hasSize(2);
     }
 
     @Test
+    @DisplayName("GET /api/keywords/{keywordId}/alerts - 존재하지 않는 keywordId: 404 반환")
+    void getAlertsByKeyword_nonExistentKeywordId_returns404() {
+        ResponseEntity<String> response = restTemplate.getForEntity(
+                "/api/keywords/99999/alerts", String.class);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+    }
+
+    @Test
+    @DisplayName("GET /api/keywords?global=false - 지원하지 않는 값: 400 반환")
+    void getKeywords_globalFalse_returns400() {
+        ResponseEntity<String> response = restTemplate.getForEntity(
+                "/api/keywords?global=false", String.class);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+    }
+
+    @Test
+    @DisplayName("GET /api/keywords?global=true&active=true - 두 파라미터 동시 사용: 400 반환")
+    void getKeywords_globalAndActiveTogether_returns400() {
+        ResponseEntity<String> response = restTemplate.getForEntity(
+                "/api/keywords?global=true&active=true", String.class);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+    }
+
+    @Test
+    @DisplayName("PATCH /api/keywords/{id} - keyword 빈 문자열: 기존 keyword 유지")
+    void patchKeyword_emptyKeyword_doesNotUpdateKeyword() {
+        Keyword keyword = Keyword.builder()
+                .keyword("원래 키워드")
+                .site(testSite)
+                .active(true)
+                .build();
+        keyword = keywordRepository.save(keyword);
+
+        KeywordRequest patch = KeywordRequest.builder().keyword("").build();
+        ResponseEntity<KeywordResponse> response = restTemplate.exchange(
+                "/api/keywords/" + keyword.getId(),
+                HttpMethod.PATCH,
+                new HttpEntity<>(patch),
+                KeywordResponse.class);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getBody()).isNotNull();
+        assertThat(response.getBody().getKeyword()).isEqualTo("원래 키워드");
+    }
+
+    @Test
     @DisplayName("키워드 등록 - DB에서 site_id 확인")
     void createKeyword_VerifySiteIdInDatabase() {
-        // Given
         KeywordRequest request = KeywordRequest.builder()
                 .keyword("DB 검증 키워드")
                 .siteId(testSite.getId())
                 .active(true)
                 .build();
 
-        // When
         ResponseEntity<KeywordResponse> response = restTemplate.postForEntity(
                 "/api/keywords",
                 request,
                 KeywordResponse.class
         );
 
-        // Then - API 응답 확인
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CREATED);
         assertThat(response.getBody()).isNotNull();
         assertThat(response.getBody().getSiteId()).isEqualTo(testSite.getId());
 
-        // Then - DB에서 직접 확인
         Keyword savedKeyword = keywordRepository.findAll().get(0);
         assertThat(savedKeyword.getSite()).isNotNull();
         assertThat(savedKeyword.getSite().getId()).isEqualTo(testSite.getId());

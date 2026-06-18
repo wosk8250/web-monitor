@@ -98,6 +98,48 @@ class ProductServiceTest {
     }
 
     @Test
+    @DisplayName("제품 수정 - notifyOnContentChange 업데이트 확인")
+    void updateProduct_updatesNotifyOnContentChange() {
+        // Given
+        Product updatedData = Product.builder()
+                .name("수정된 제품명")
+                .url("https://test.com/updated")
+                .active(true)
+                .notifyOnRestock(true)
+                .notifyOnContentChange(false)
+                .priority(Product.Priority.NORMAL)
+                .checkIntervalMinutes(5)
+                .build();
+
+        // When
+        Product updated = productService.updateProduct(testProduct.getId(), updatedData);
+
+        // Then
+        assertThat(updated.getNotifyOnContentChange()).isFalse();
+    }
+
+    @Test
+    @DisplayName("제품 수정 - notifyOnContentChange가 null이면 기존값 유지")
+    void updateProduct_nullNotifyOnContentChange_keepsExistingValue() {
+        // Given: testProduct의 notifyOnContentChange = true (builder default)
+        Product updatedData = Product.builder()
+                .name("수정된 제품명")
+                .url("https://test.com/updated")
+                .active(true)
+                .notifyOnRestock(true)
+                .priority(Product.Priority.NORMAL)
+                .checkIntervalMinutes(5)
+                .build();
+        updatedData.setNotifyOnContentChange(null);
+
+        // When
+        Product updated = productService.updateProduct(testProduct.getId(), updatedData);
+
+        // Then: null이 전달되어도 기존값(true)이 유지됨
+        assertThat(updated.getNotifyOnContentChange()).isTrue();
+    }
+
+    @Test
     @DisplayName("존재하지 않는 제품 수정 시 예외 발생")
     void updateProduct_NotFound_ThrowsException() {
         // Given

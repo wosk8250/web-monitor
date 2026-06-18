@@ -5,6 +5,7 @@ import com.webmonitor.domain.Keyword;
 import com.webmonitor.domain.Site;
 import com.webmonitor.dto.SiteRequest;
 import com.webmonitor.dto.SiteResponse;
+import com.webmonitor.exception.resource.SiteNotFoundException;
 import com.webmonitor.repository.AlertRepository;
 import com.webmonitor.repository.KeywordRepository;
 import com.webmonitor.repository.SiteRepository;
@@ -165,8 +166,7 @@ class SiteServiceTest {
 
         // When & Then
         assertThatThrownBy(() -> siteService.deleteSite(nonExistentId))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("사이트를 찾을 수 없습니다");
+                .isInstanceOf(SiteNotFoundException.class);
     }
 
     @Test
@@ -223,32 +223,23 @@ class SiteServiceTest {
 
         // When & Then
         assertThatThrownBy(() -> siteService.updateSite(nonExistentId, request))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("사이트를 찾을 수 없습니다");
+                .isInstanceOf(SiteNotFoundException.class);
     }
 
     @Test
-    @DisplayName("사이트 활성화 토글 - 정상 케이스")
-    void toggleSiteActive_Success() {
-        // Given
-        boolean initialActive = testSite.getActive();
+    @DisplayName("사이트 부분 수정 - active만 변경 시 name/url 유지")
+    void updateSite_partialUpdate_onlyActive_preservesNameAndUrl() {
+        // Given: active만 변경하는 부분 수정 요청
+        SiteRequest request = SiteRequest.builder()
+                .active(false)
+                .build();
 
         // When
-        SiteResponse toggledSite = siteService.toggleSiteActive(testSite.getId());
+        SiteResponse updated = siteService.updateSite(testSite.getId(), request);
 
         // Then
-        assertThat(toggledSite.getActive()).isEqualTo(!initialActive);
-    }
-
-    @Test
-    @DisplayName("사이트 활성화 토글 - 존재하지 않는 ID")
-    void toggleSiteActive_NotFound() {
-        // Given
-        Long nonExistentId = 99999L;
-
-        // When & Then
-        assertThatThrownBy(() -> siteService.toggleSiteActive(nonExistentId))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("사이트를 찾을 수 없습니다");
+        assertThat(updated.getActive()).isFalse();
+        assertThat(updated.getName()).isEqualTo(testSite.getName());
+        assertThat(updated.getUrl()).isEqualTo(testSite.getUrl());
     }
 }

@@ -19,12 +19,11 @@ public class ProductMonitorScheduler {
 
     /**
      * 긴급 우선순위 제품 모니터링 (URGENT)
-     * 30초마다 실행
+     * 10초마다 실행
      */
-    @Scheduled(fixedDelay = 30000, initialDelay = 5000)
-    public void monitorUrgentProductsEvery30Seconds() {
+    @Scheduled(fixedDelay = 10000, initialDelay = 5000)
+    public void monitorUrgentProductsEvery10Seconds() {
         try {
-            log.debug("긴급 제품 모니터링 스케줄러 시작 (30초 주기)");
             productMonitorService.monitorUrgentProducts();
         } catch (Exception e) {
             log.error("긴급 제품 모니터링 스케줄러 실행 중 오류", e);
@@ -38,7 +37,6 @@ public class ProductMonitorScheduler {
     @Scheduled(fixedDelay = 60000, initialDelay = 10000)
     public void monitorNormalProductsEveryMinute() {
         try {
-            log.debug("일반 제품 모니터링 스케줄러 시작 (60초 주기)");
             productMonitorService.monitorNormalProducts();
         } catch (Exception e) {
             log.error("일반 제품 모니터링 스케줄러 실행 중 오류", e);

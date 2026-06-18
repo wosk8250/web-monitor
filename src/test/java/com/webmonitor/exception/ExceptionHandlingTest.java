@@ -61,12 +61,11 @@ class ExceptionHandlingTest {
     }
 
     @Test
-    @DisplayName("존재하지 않는 사이트 토글 - 404 응답")
-    void testToggleNonExistentSite() throws Exception {
-        // Given: 존재하지 않는 사이트 ID
-
-        // When & Then: Controller는 IllegalArgumentException을 잡아서 404 반환
-        mockMvc.perform(patch("/api/sites/999/toggle"))
+    @DisplayName("존재하지 않는 사이트 PATCH - 404 응답")
+    void testPatchNonExistentSite() throws Exception {
+        mockMvc.perform(patch("/api/sites/999")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"active\":false}"))
                 .andExpect(status().isNotFound());
     }
 

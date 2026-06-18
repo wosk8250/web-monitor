@@ -3,6 +3,9 @@ package com.webmonitor.service;
 import com.webmonitor.domain.Keyword;
 import com.webmonitor.domain.Site;
 import com.webmonitor.dto.KeywordRequest;
+import com.webmonitor.dto.KeywordResponse;
+import com.webmonitor.exception.resource.KeywordNotFoundException;
+import com.webmonitor.exception.resource.SiteNotFoundException;
 import com.webmonitor.repository.KeywordRepository;
 import com.webmonitor.repository.SiteRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -18,9 +21,6 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/**
- * KeywordService 통합 테스트
- */
 @SpringBootTest
 @Transactional
 class KeywordServiceTest {
@@ -39,11 +39,9 @@ class KeywordServiceTest {
 
     @BeforeEach
     void setUp() {
-        // 테스트 데이터 초기화
         keywordRepository.deleteAll();
         siteRepository.deleteAll();
 
-        // 테스트용 사이트 생성
         testSite = Site.builder()
                 .name("테스트 사이트")
                 .url("https://test.com")
@@ -52,7 +50,6 @@ class KeywordServiceTest {
                 .build();
         testSite = siteRepository.save(testSite);
 
-        // 테스트용 키워드 생성
         testKeyword = Keyword.builder()
                 .keyword("테스트")
                 .site(testSite)
@@ -64,56 +61,47 @@ class KeywordServiceTest {
     @Test
     @DisplayName("일반 키워드 등록 성공")
     void createKeyword_Success() {
-        // Given
         KeywordRequest request = KeywordRequest.builder()
                 .keyword("새 키워드")
                 .siteId(testSite.getId())
                 .active(true)
                 .build();
 
-        // When
-        Keyword created = keywordService.createKeyword(request);
+        Optional<KeywordResponse> result = keywordService.createKeyword(request);
 
-        // Then
-        assertThat(created).isNotNull();
-        assertThat(created.getKeyword()).isEqualTo("새 키워드");
-        assertThat(created.getSite().getId()).isEqualTo(testSite.getId());
+        assertThat(result).isPresent();
+        assertThat(result.get().getKeyword()).isEqualTo("새 키워드");
+        assertThat(result.get().getSiteId()).isEqualTo(testSite.getId());
         assertThat(keywordRepository.count()).isEqualTo(2);
     }
 
     @Test
     @DisplayName("전체 공통 키워드 등록 성공 (siteId null)")
     void createKeyword_GlobalKeyword_Success() {
-        // Given
         KeywordRequest request = KeywordRequest.builder()
                 .keyword("공통 키워드")
                 .siteId(null)
                 .active(true)
                 .build();
 
-        // When
-        Keyword created = keywordService.createKeyword(request);
+        Optional<KeywordResponse> result = keywordService.createKeyword(request);
 
-        // Then
-        assertThat(created).isNotNull();
-        assertThat(created.getKeyword()).isEqualTo("공통 키워드");
-        assertThat(created.getSite()).isNull();
+        assertThat(result).isPresent();
+        assertThat(result.get().getKeyword()).isEqualTo("공통 키워드");
+        assertThat(result.get().getSiteId()).isNull();
     }
 
     @Test
-    @DisplayName("공백 키워드 등록 시 새글 감지 활성화")
+    @DisplayName("공백 키워드 등록 시 새글 감지 활성화, Optional.empty() 반환")
     void createKeyword_EmptyKeyword_ActivatesContentDetection() {
-        // Given
         KeywordRequest request = KeywordRequest.builder()
                 .keyword("   ")
                 .siteId(testSite.getId())
                 .build();
 
-        // When
-        Keyword result = keywordService.createKeyword(request);
+        Optional<KeywordResponse> result = keywordService.createKeyword(request);
 
-        // Then
-        assertThat(result).isNull(); // 키워드는 저장되지 않음
+        assertThat(result).isEmpty();
         Site updatedSite = siteRepository.findById(testSite.getId()).orElseThrow();
         assertThat(updatedSite.getDetectContentChange()).isTrue();
     }
@@ -121,13 +109,11 @@ class KeywordServiceTest {
     @Test
     @DisplayName("공백 키워드를 전체 공통으로 등록 시 예외 발생")
     void createKeyword_EmptyKeywordWithoutSite_ThrowsException() {
-        // Given
         KeywordRequest request = KeywordRequest.builder()
                 .keyword("")
                 .siteId(null)
                 .build();
 
-        // When & Then
         assertThatThrownBy(() -> keywordService.createKeyword(request))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("공백 키워드(새글 감지)는 특정 사이트에만 설정할 수 있습니다");
@@ -136,13 +122,11 @@ class KeywordServiceTest {
     @Test
     @DisplayName("null 키워드 등록 시 예외 발생")
     void createKeyword_NullKeyword_ThrowsException() {
-        // Given
         KeywordRequest request = KeywordRequest.builder()
                 .keyword(null)
                 .siteId(testSite.getId())
                 .build();
 
-        // When & Then
         assertThatThrownBy(() -> keywordService.createKeyword(request))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("키워드는 null일 수 없습니다");
@@ -151,32 +135,26 @@ class KeywordServiceTest {
     @Test
     @DisplayName("존재하지 않는 사이트 ID로 키워드 등록 시 예외 발생")
     void createKeyword_NonExistentSite_ThrowsException() {
-        // Given
         KeywordRequest request = KeywordRequest.builder()
                 .keyword("테스트")
                 .siteId(99999L)
                 .build();
 
-        // When & Then
         assertThatThrownBy(() -> keywordService.createKeyword(request))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("사이트를 찾을 수 없습니다");
+                .isInstanceOf(SiteNotFoundException.class);
     }
 
     @Test
     @DisplayName("키워드 수정 성공")
     void updateKeyword_Success() {
-        // Given
         KeywordRequest request = KeywordRequest.builder()
                 .keyword("수정된 키워드")
                 .siteId(testSite.getId())
                 .active(false)
                 .build();
 
-        // When
-        Keyword updated = keywordService.updateKeyword(testKeyword.getId(), request);
+        KeywordResponse updated = keywordService.updateKeyword(testKeyword.getId(), request);
 
-        // Then
         assertThat(updated.getKeyword()).isEqualTo("수정된 키워드");
         assertThat(updated.getActive()).isFalse();
     }
@@ -184,10 +162,8 @@ class KeywordServiceTest {
     @Test
     @DisplayName("키워드 삭제 성공")
     void deleteKeyword_Success() {
-        // When
         keywordService.deleteKeyword(testKeyword.getId());
 
-        // Then
         assertThat(keywordRepository.count()).isEqualTo(0);
         assertThat(keywordRepository.findById(testKeyword.getId())).isEmpty();
     }
@@ -195,10 +171,8 @@ class KeywordServiceTest {
     @Test
     @DisplayName("ID로 키워드 조회 성공")
     void getKeywordById_Success() {
-        // When
-        Optional<Keyword> found = keywordService.getKeywordById(testKeyword.getId());
+        Optional<KeywordResponse> found = keywordService.getKeywordById(testKeyword.getId());
 
-        // Then
         assertThat(found).isPresent();
         assertThat(found.get().getKeyword()).isEqualTo("테스트");
     }
@@ -206,7 +180,6 @@ class KeywordServiceTest {
     @Test
     @DisplayName("모든 키워드 조회")
     void getAllKeywords_ReturnsAll() {
-        // Given
         Keyword keyword2 = Keyword.builder()
                 .keyword("키워드2")
                 .site(testSite)
@@ -214,17 +187,14 @@ class KeywordServiceTest {
                 .build();
         keywordRepository.save(keyword2);
 
-        // When
-        List<Keyword> keywords = keywordService.getAllKeywords();
+        List<KeywordResponse> keywords = keywordService.getAllKeywords();
 
-        // Then
         assertThat(keywords).hasSize(2);
     }
 
     @Test
     @DisplayName("활성화된 키워드만 조회")
     void getActiveKeywords_ReturnsOnlyActive() {
-        // Given
         Keyword inactiveKeyword = Keyword.builder()
                 .keyword("비활성 키워드")
                 .site(testSite)
@@ -232,10 +202,8 @@ class KeywordServiceTest {
                 .build();
         keywordRepository.save(inactiveKeyword);
 
-        // When
-        List<Keyword> activeKeywords = keywordService.getActiveKeywords();
+        List<KeywordResponse> activeKeywords = keywordService.getActiveKeywords();
 
-        // Then
         assertThat(activeKeywords).hasSize(1);
         assertThat(activeKeywords.get(0).getActive()).isTrue();
     }
@@ -243,7 +211,6 @@ class KeywordServiceTest {
     @Test
     @DisplayName("특정 사이트의 키워드 조회")
     void getKeywordsBySite_ReturnsCorrectKeywords() {
-        // Given
         Site anotherSite = Site.builder()
                 .name("다른 사이트")
                 .url("https://another.com")
@@ -258,21 +225,18 @@ class KeywordServiceTest {
                 .build();
         keywordRepository.save(keywordForAnotherSite);
 
-        // When
-        List<Keyword> keywordsForTestSite = keywordService.getKeywordsBySite(testSite.getId());
-        List<Keyword> keywordsForAnotherSite = keywordService.getKeywordsBySite(anotherSite.getId());
+        List<KeywordResponse> keywordsForTestSite = keywordService.getKeywordsBySite(testSite.getId());
+        List<KeywordResponse> keywordsForAnotherSite = keywordService.getKeywordsBySite(anotherSite.getId());
 
-        // Then
         assertThat(keywordsForTestSite).hasSize(1);
-        assertThat(keywordsForTestSite.get(0).getSite().getId()).isEqualTo(testSite.getId());
+        assertThat(keywordsForTestSite.get(0).getSiteId()).isEqualTo(testSite.getId());
         assertThat(keywordsForAnotherSite).hasSize(1);
-        assertThat(keywordsForAnotherSite.get(0).getSite().getId()).isEqualTo(anotherSite.getId());
+        assertThat(keywordsForAnotherSite.get(0).getSiteId()).isEqualTo(anotherSite.getId());
     }
 
     @Test
     @DisplayName("전체 공통 키워드 조회")
     void getGlobalKeywords_ReturnsOnlyGlobal() {
-        // Given
         Keyword globalKeyword = Keyword.builder()
                 .keyword("공통 키워드")
                 .site(null)
@@ -280,37 +244,126 @@ class KeywordServiceTest {
                 .build();
         keywordRepository.save(globalKeyword);
 
-        // When
-        List<Keyword> globalKeywords = keywordService.getGlobalKeywords();
+        List<KeywordResponse> globalKeywords = keywordService.getGlobalKeywords();
 
-        // Then
         assertThat(globalKeywords).hasSize(1);
-        assertThat(globalKeywords.get(0).getSite()).isNull();
+        assertThat(globalKeywords.get(0).getSiteId()).isNull();
         assertThat(globalKeywords.get(0).getKeyword()).isEqualTo("공통 키워드");
     }
 
     @Test
-    @DisplayName("키워드 활성화/비활성화 토글")
-    void toggleKeywordActive_Success() {
-        // Given
-        boolean initialActive = testKeyword.getActive();
+    @DisplayName("키워드 부분 수정 - active만 변경 시 keyword와 siteId 유지")
+    void updateKeyword_partialUpdate_onlyActive_preservesKeywordAndSite() {
+        KeywordRequest request = KeywordRequest.builder()
+                .active(false)
+                .build();
 
-        // When
-        Keyword toggled = keywordService.toggleKeywordActive(testKeyword.getId());
+        KeywordResponse updated = keywordService.updateKeyword(testKeyword.getId(), request);
 
-        // Then
-        assertThat(toggled.getActive()).isEqualTo(!initialActive);
+        assertThat(updated.getActive()).isFalse();
+        assertThat(updated.getKeyword()).isEqualTo("테스트");
+        assertThat(updated.getSiteId()).isEqualTo(testSite.getId());
     }
 
     @Test
-    @DisplayName("존재하지 않는 키워드 토글 시 예외 발생")
-    void toggleKeywordActive_NotFound_ThrowsException() {
-        // Given
-        Long nonExistentId = 99999L;
+    @DisplayName("존재하지 않는 키워드 수정 시 예외 발생")
+    void updateKeyword_notFound_throwsException() {
+        KeywordRequest request = KeywordRequest.builder()
+                .keyword("수정 키워드")
+                .siteId(testSite.getId())
+                .build();
 
-        // When & Then
-        assertThatThrownBy(() -> keywordService.toggleKeywordActive(nonExistentId))
+        assertThatThrownBy(() -> keywordService.updateKeyword(99999L, request))
+                .isInstanceOf(KeywordNotFoundException.class);
+    }
+
+    // ===============================
+    // addKeywordToSite 테스트
+    // ===============================
+
+    @Test
+    @DisplayName("addKeywordToSite: detectContentChange=true 사이트에 키워드 추가 시 detectContentChange=false 로 전환")
+    void addKeywordToSite_WhenDetectContentChangeIsTrue_ShouldSwitchToKeywordMode() {
+        Site site = siteRepository.save(Site.builder()
+                .name("콘텐츠 감지 사이트")
+                .url("https://content.com")
+                .active(true)
+                .detectContentChange(true)
+                .build());
+
+        Keyword result = keywordService.addKeywordToSite(site, "신규 키워드");
+
+        assertThat(result.getId()).isNotNull();
+        assertThat(result.getKeyword()).isEqualTo("신규 키워드");
+        assertThat(result.getSite().getId()).isEqualTo(site.getId());
+
+        Site updated = siteRepository.findById(site.getId()).orElseThrow();
+        assertThat(updated.getDetectContentChange()).isFalse();
+    }
+
+    @Test
+    @DisplayName("addKeywordToSite: detectContentChange=false 사이트에 키워드 추가 시 상태 변경 없음")
+    void addKeywordToSite_WhenAlreadyInKeywordMode_ShouldNotChangeSiteState() {
+        // testSite는 detectContentChange=false 로 setUp
+
+        Keyword result = keywordService.addKeywordToSite(testSite, "추가 키워드");
+
+        assertThat(result.getId()).isNotNull();
+        assertThat(result.getKeyword()).isEqualTo("추가 키워드");
+
+        Site unchanged = siteRepository.findById(testSite.getId()).orElseThrow();
+        assertThat(unchanged.getDetectContentChange()).isFalse();
+        assertThat(keywordRepository.findBySite(testSite)).hasSize(2);
+    }
+
+    @Test
+    @DisplayName("addKeywordToSite: 이미 등록된 키워드 추가 시 IllegalArgumentException")
+    void addKeywordToSite_WhenDuplicateKeyword_ShouldThrowIllegalArgumentException() {
+        // testKeyword ("테스트")는 testSite에 이미 등록됨 (setUp)
+        assertThatThrownBy(() -> keywordService.addKeywordToSite(testSite, "테스트"))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("키워드를 찾을 수 없습니다");
+                .hasMessageContaining("이미 등록된 키워드입니다");
+    }
+
+    @Test
+    @DisplayName("addKeywordToSite: 공백 키워드 추가 시 IllegalArgumentException")
+    void addKeywordToSite_WhenBlankKeyword_ShouldThrowIllegalArgumentException() {
+        assertThatThrownBy(() -> keywordService.addKeywordToSite(testSite, "   "))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("키워드를 입력해주세요");
+    }
+
+    // ===============================
+    // removeKeywordFromSite 테스트
+    // ===============================
+
+    @Test
+    @DisplayName("removeKeywordFromSite: 마지막 키워드 삭제 시 detectContentChange=true 복원")
+    void removeKeywordFromSite_WhenLastKeyword_ShouldRestoreContentChangeDetection() {
+        // testSite에 testKeyword 1개만 존재 (setUp 기준)
+        keywordService.removeKeywordFromSite(testSite, testKeyword);
+
+        assertThat(keywordRepository.findBySite(testSite)).isEmpty();
+
+        Site restored = siteRepository.findById(testSite.getId()).orElseThrow();
+        assertThat(restored.getDetectContentChange()).isTrue();
+    }
+
+    @Test
+    @DisplayName("removeKeywordFromSite: 키워드가 남아있으면 detectContentChange 복원 안 함")
+    void removeKeywordFromSite_WhenMoreKeywordsRemain_ShouldNotRestoreContentChangeDetection() {
+        Keyword extra = keywordRepository.save(Keyword.builder()
+                .keyword("추가 키워드")
+                .site(testSite)
+                .active(true)
+                .build());
+
+        keywordService.removeKeywordFromSite(testSite, testKeyword);
+
+        assertThat(keywordRepository.findBySite(testSite)).hasSize(1);
+        assertThat(keywordRepository.findBySite(testSite).get(0).getId()).isEqualTo(extra.getId());
+
+        Site unchanged = siteRepository.findById(testSite.getId()).orElseThrow();
+        assertThat(unchanged.getDetectContentChange()).isFalse();
     }
 }

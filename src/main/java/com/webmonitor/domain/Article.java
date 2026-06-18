@@ -11,7 +11,10 @@ import java.time.LocalDateTime;
  * 개별 게시글 추적 및 중복 감지를 위해 사용
  */
 @Entity
-@Table(name = "articles")
+@Table(name = "articles", indexes = {
+    @Index(name = "idx_article_site_article_id",  columnList = "site_id, article_id"),
+    @Index(name = "idx_article_site_article_url", columnList = "site_id, article_url", unique = true)
+})
 @Getter
 @Setter
 @NoArgsConstructor

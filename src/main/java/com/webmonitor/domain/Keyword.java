@@ -12,8 +12,11 @@ import java.time.LocalDateTime;
 /**
  * 사이트에서 감시할 키워드 정보를 저장하는 엔티티
  */
-@Entity // JPA 엔티티로 지정 (데이터베이스 테이블과 매핑)
-@Table(name = "keywords") // 테이블 이름을 'keywords'로 지정
+@Entity
+@Table(name = "keywords", indexes = {
+    @Index(name = "idx_keyword_site_active", columnList = "site_id, active"),
+    @Index(name = "idx_keyword_active",      columnList = "active")
+})
 @Getter // 모든 필드의 Getter 메서드 자동 생성
 @Setter // 모든 필드의 Setter 메서드 자동 생성
 @NoArgsConstructor // 파라미터가 없는 기본 생성자 자동 생성

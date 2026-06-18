@@ -310,6 +310,39 @@ class AlertRepositoryTest {
         assertThat(saved.canRetry()).isTrue();
     }
 
+    @Test
+    void deleteByAlertTypeAndDetectedAtBefore_deletesMatchingTypeOnly() {
+        // Given: KEYWORD 1개, PRODUCT_RESTOCK 1개 (모두 방금 생성 → detectedAt = now())
+        alertRepository.save(createTestAlert("키워드 알림", "https://example.com/kw"));
+        alertRepository.save(Alert.builder()
+                .site(testSite)
+                .alertType(Alert.AlertType.PRODUCT_RESTOCK)
+                .message("재고 알림").detectedUrl("https://example.com/rs")
+                .sent(false).retryCount(0).build());
+
+        // When: 미래 cutoff(+1일)로 KEYWORD 타입만 삭제 → KEYWORD 1건 삭제 기대
+        int deleted = alertRepository.deleteByAlertTypeAndDetectedAtBefore(
+                Alert.AlertType.KEYWORD, LocalDateTime.now().plusDays(1));
+
+        // Then: KEYWORD 1건 삭제, PRODUCT_RESTOCK 유지
+        assertThat(deleted).isEqualTo(1);
+        assertThat(alertRepository.findAll())
+                .extracting(Alert::getMessage)
+                .containsExactly("재고 알림");
+    }
+
+    @Test
+    void deleteByAlertTypeAndDetectedAtBefore_cutoffInPast_returnsZero() {
+        // Given: 방금 생성된 알림 (detectedAt = now())
+        alertRepository.save(createTestAlert("알림", "https://example.com/now"));
+
+        // When: 과거 cutoff → 삭제 대상 없음
+        int deleted = alertRepository.deleteByAlertTypeAndDetectedAtBefore(
+                Alert.AlertType.KEYWORD, LocalDateTime.now().minusDays(1));
+
+        assertThat(deleted).isEqualTo(0);
+    }
+
     /**
      * 테스트용 Alert 생성 헬퍼 메서드
      */

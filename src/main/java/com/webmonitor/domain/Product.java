@@ -98,9 +98,21 @@ public class Product {
     @Builder.Default
     private Integer checkIntervalMinutes = 3;  // 개별 체크 주기 (기본 3분)
 
+    @Min(value = 20, message = ValidationMessages.PRODUCT_CHECK_INTERVAL_SECONDS_MIN)
+    @Max(value = 3600, message = ValidationMessages.PRODUCT_CHECK_INTERVAL_SECONDS_MAX)
+    @Column
+    private Integer checkIntervalSeconds;  // 초 단위 체크 주기 (선택사항, null이면 checkIntervalMinutes 사용)
+
     private LocalDateTime lastCheckedAt;  // 마지막 체크 시간
 
     private LocalDateTime lastRestockAlertAt;  // 마지막 재입고 알림 시간
+
+    private LocalDateTime lastContentChangeAlertAt;  // 마지막 콘텐츠 변경 알림 시간
+
+    @NotNull(message = ValidationMessages.COMMON_NOT_NULL)
+    @Column(nullable = false)
+    @Builder.Default
+    private Boolean notifyOnContentChange = true;  // 콘텐츠 변경 알림 설정
 
     @NotNull(message = ValidationMessages.COMMON_NOT_NULL)
     @Min(value = 0, message = ValidationMessages.PRODUCT_CONSECUTIVE_FAILURES_MIN)
@@ -133,7 +145,7 @@ public class Product {
 
     /**
      * 우선순위 enum
-     * URGENT: 30초 스케줄러에서 체크
+     * URGENT: 10초 스케줄러에서 체크
      * NORMAL: 60초 스케줄러에서 체크
      */
     public enum Priority {

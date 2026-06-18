@@ -24,6 +24,7 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 
 import java.io.IOException;
 import java.time.LocalDateTime;
@@ -93,6 +94,24 @@ public class GlobalExceptionHandler {
     }
 
     /**
+     * HttpMessageNotReadableException - JSON 파싱 실패 (잘못된 형식, 필수 필드 누락 등)
+     * RuntimeException을 상속하므로 명시적 핸들러 없으면 handleRuntimeException이 500을 반환함
+     */
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ResponseEntity<ErrorResponse> handleHttpMessageNotReadable(HttpMessageNotReadableException ex) {
+        log.warn("요청 본문 파싱 실패: {}", ex.getMessage());
+
+        ErrorResponse response = ErrorResponse.builder()
+                .timestamp(LocalDateTime.now())
+                .status(HttpStatus.BAD_REQUEST.value())
+                .error("Malformed JSON")
+                .message("요청 본문을 읽을 수 없습니다. JSON 형식을 확인해주세요.")
+                .build();
+
+        return ResponseEntity.badRequest().body(response);
+    }
+
+    /**
      * IllegalArgumentException - 잘못된 인수
      */
     @ExceptionHandler(IllegalArgumentException.class)
@@ -124,23 +143,6 @@ public class GlobalExceptionHandler {
                 .build();
 
         return ResponseEntity.status(HttpStatus.CONFLICT).body(response);
-    }
-
-    /**
-     * NullPointerException - null 참조
-     */
-    @ExceptionHandler(NullPointerException.class)
-    public ResponseEntity<ErrorResponse> handleNullPointer(NullPointerException ex) {
-        log.error("NullPointerException 발생", ex);
-
-        ErrorResponse response = ErrorResponse.builder()
-                .timestamp(LocalDateTime.now())
-                .status(HttpStatus.INTERNAL_SERVER_ERROR.value())
-                .error("Null Pointer Exception")
-                .message("서버 내부 오류가 발생했습니다. 관리자에게 문의하세요.")
-                .build();
-
-        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(response);
     }
 
     // ========================================

@@ -2,12 +2,20 @@ package com.webmonitor.util;
 
 import lombok.experimental.UtilityClass;
 
+import java.util.regex.Pattern;
+
 /**
  * Discord 관련 유틸리티 클래스
  * 웹훅 URL 검증 및 마스킹 등의 공통 기능 제공
  */
 @UtilityClass
 public class DiscordUtils {
+
+    // {id}/{token} 두 세그먼트 모두 필수 — prefix-only URL 차단
+    private static final Pattern WEBHOOK_URL_PATTERN = Pattern.compile(
+            "https://(discord\\.com|discordapp\\.com)/api/webhooks/\\d+/[\\w-]+",
+            Pattern.CASE_INSENSITIVE
+    );
 
     /**
      * 디스코드 웹훅 URL 형식 검증
@@ -19,10 +27,7 @@ public class DiscordUtils {
         if (webhookUrl == null) {
             return false;
         }
-
-        String url = webhookUrl.trim().toLowerCase();
-        return url.startsWith("https://discord.com/api/webhooks/") ||
-               url.startsWith("https://discordapp.com/api/webhooks/");
+        return WEBHOOK_URL_PATTERN.matcher(webhookUrl.trim()).matches();
     }
 
     /**

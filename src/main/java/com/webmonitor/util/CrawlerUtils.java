@@ -86,7 +86,7 @@ public class CrawlerUtils {
                         .timeout(WebCrawlerConstants.TIMEOUT_LONG_MS)
                         .maxBodySize(1024 * 1024)  // 1MB 제한 (메모리 보호)
                         .ignoreHttpErrors(false)    // HTTP 에러도 처리
-                        .followRedirects(true)      // 리다이렉트 허용
+                        .followRedirects(false)     // SSRF 방어: 리다이렉트가 validateUrl 검증을 우회할 수 있음
                         .get();
 
                 if (attempt > 1) {

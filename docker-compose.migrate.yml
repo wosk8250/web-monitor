@@ -1,0 +1,9 @@
+# 마이그레이션 전용 override — 호스트에서 psql/migrate script 접속 허용
+# 사용법: docker compose -f docker-compose.yml -f docker-compose.migrate.yml up -d postgres
+# 마이그레이션 완료 후: docker compose up -d postgres  (포트 닫힘, web-monitor 영향 없음)
+
+version: '3.8'
+services:
+  postgres:
+    ports:
+      - "127.0.0.1:5432:5432"

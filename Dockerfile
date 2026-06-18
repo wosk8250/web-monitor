@@ -22,8 +22,7 @@ RUN addgroup -S appgroup && adduser -S appuser -G appgroup
 # Copy JAR from build stage
 COPY --from=build /app/target/*.jar app.jar
 
-# Create data directory for H2 database
-RUN mkdir -p /app/data && chown -R appuser:appgroup /app
+RUN chown -R appuser:appgroup /app
 
 # Switch to non-root user
 USER appuser
@@ -36,4 +35,4 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=40s --retries=3 \
   CMD wget --no-verbose --tries=1 --spider http://localhost:8080/actuator/health || exit 1
 
 # Run application
-ENTRYPOINT ["java", "-jar", "app.jar"]
+ENTRYPOINT ["java", "-Dspring.profiles.active=prod", "-jar", "app.jar"]

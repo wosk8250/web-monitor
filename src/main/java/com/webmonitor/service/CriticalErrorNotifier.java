@@ -1,6 +1,7 @@
 package com.webmonitor.service;
 
 import com.webmonitor.event.CriticalErrorEvent;
+import com.webmonitor.util.DiscordConstants;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -13,7 +14,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
 import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -49,7 +49,6 @@ public class CriticalErrorNotifier {
     @Value("${critical.notification.exception-window-minutes:5}")
     private int exceptionWindowMinutes;
 
-    private static final DateTimeFormatter TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
     // 알림 쿨다운 관리 (키: 알림 유형, 값: 마지막 전송 시간)
     private final Map<String, LocalDateTime> lastNotificationTime = new ConcurrentHashMap<>();
@@ -171,7 +170,7 @@ public class CriticalErrorNotifier {
         fields.put("Thread Pool", poolName);
         fields.put("활성 스레드", String.format("%d / %d (%.1f%%)", activeThreads, maxThreads, (double) activeThreads / maxThreads * 100));
         fields.put("큐 사용률", String.format("%d / %d (%.1f%%)", queueSize, queueCapacity, (double) queueSize / queueCapacity * 100));
-        fields.put("시간", LocalDateTime.now().format(TIME_FORMATTER));
+        fields.put("시간", LocalDateTime.now().format(DiscordConstants.DISPLAY_FORMATTER));
 
         sendCriticalNotification(
                 "Thread Pool 포화 경고",
@@ -235,7 +234,7 @@ public class CriticalErrorNotifier {
             fields.put("발생 위치", location);
             fields.put("발생 횟수", String.format("%d회 / %d분", occurrences.size(), exceptionWindowMinutes));
             fields.put("임계값", String.format("%d회", exceptionThreshold));
-            fields.put("시간", now.format(TIME_FORMATTER));
+            fields.put("시간", now.format(DiscordConstants.DISPLAY_FORMATTER));
 
             sendCriticalNotification(
                     "연속 예외 발생 경고",

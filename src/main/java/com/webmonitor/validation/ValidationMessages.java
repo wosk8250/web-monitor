@@ -39,6 +39,8 @@ public class ValidationMessages {
     public static final String PRODUCT_CONTENT_SELECTOR_LENGTH = "콘텐츠 셀렉터는 최대 500자까지 입력 가능합니다";
     public static final String PRODUCT_CHECK_INTERVAL_MIN = "체크 주기는 최소 1분이어야 합니다";
     public static final String PRODUCT_CHECK_INTERVAL_MAX = "체크 주기는 1440분(24시간)을 초과할 수 없습니다";
+    public static final String PRODUCT_CHECK_INTERVAL_SECONDS_MIN = "초 단위 체크 주기는 최소 20초이어야 합니다";
+    public static final String PRODUCT_CHECK_INTERVAL_SECONDS_MAX = "초 단위 체크 주기는 최대 3600초(1시간)을 초과할 수 없습니다";
     public static final String PRODUCT_DISCORD_USER_ID_LENGTH = "Discord User ID는 최대 20자까지 입력 가능합니다";
     public static final String PRODUCT_PRICE_MIN = "가격은 0 이상이어야 합니다";
     public static final String PRODUCT_CONSECUTIVE_FAILURES_MIN = "연속 실패 횟수는 0 이상이어야 합니다";

@@ -3,6 +3,7 @@ package com.webmonitor.repository;
 import com.webmonitor.domain.Site;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -98,4 +99,13 @@ public interface SiteRepository extends JpaRepository<Site, Long> {
      * @return 존재 여부
      */
     boolean existsByDiscordUserIdAndUrl(String discordUserId, String url);
+
+    /**
+     * 모든 사이트의 lastContentHash를 null로 초기화 (벌크 업데이트)
+     * MonitorService.resetAllHashes()에서 사용
+     * @return 업데이트된 사이트 수
+     */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("UPDATE Site s SET s.lastContentHash = null")
+    int resetAllContentHashes();
 }

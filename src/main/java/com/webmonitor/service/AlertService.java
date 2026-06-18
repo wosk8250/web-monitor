@@ -1,22 +1,24 @@
 package com.webmonitor.service;
 
 import com.webmonitor.domain.Alert;
+import com.webmonitor.domain.Site;
+import com.webmonitor.dto.AlertResponse;
+import com.webmonitor.dto.SettingResponse;
+import com.webmonitor.exception.resource.AlertNotFoundException;
 import com.webmonitor.repository.AlertRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.time.LocalDateTime;
 import java.util.List;
-import java.util.Optional;
 
 /**
  * 알림 서비스
@@ -32,9 +34,8 @@ public class AlertService {
 
     private final AlertRepository alertRepository;
     private final DiscordService discordService;
-
-    @Value("${discord.webhook.url:}")
-    private String webhookUrl;
+    private final SettingService settingService;
+    private final AlertStatusUpdater alertStatusUpdater;
 
     /**
      * 알림 생성 및 우선순위 처리
@@ -87,7 +88,7 @@ public class AlertService {
     public void sendAlertWithRetry(Long alertId) {
         // 1. 조회만 수행 (트랜잭션 없음)
         Alert alert = alertRepository.findById(alertId)
-                .orElseThrow(() -> new IllegalArgumentException("알림을 찾을 수 없습니다. ID: " + alertId));
+                .orElseThrow(() -> new AlertNotFoundException(alertId));
 
         // 2. 재시도 가능 여부 확인
         if (!alert.canRetry()) {
@@ -103,47 +104,44 @@ public class AlertService {
         String errorMessage = null;
 
         try {
-            discordService.sendAlert(webhookUrl, alert);
-            sendSuccess = true;
-            log.info("Discord 알림 발송 성공 - ID: {}", alert.getId());
+            SettingResponse setting = settingService.findActiveSetting().orElse(null);
+            if (setting == null || !setting.enabled()
+                    || setting.discordWebhookUrl() == null
+                    || setting.discordWebhookUrl().trim().isEmpty()) {
+                log.debug("활성화된 Discord 설정이 없어 알림 전송 건너뜀 - ID: {}", alert.getId());
+                sendSuccess = true; // 설정 없음 = 전송 불필요, 재시도 불필요
+            } else {
+                discordService.sendAlert(setting.discordWebhookUrl(), alert);
+                sendSuccess = true;
+                log.info("Discord 알림 발송 성공 - ID: {}", alert.getId());
+            }
         } catch (Exception e) {
             log.error("Discord 알림 발송 실패 - ID: {}, 에러: {}", alert.getId(), e.getMessage());
             errorMessage = e.getMessage();
         }
 
         // 4. 결과를 별도 트랜잭션으로 업데이트
-        updateAlertStatus(alertId, sendSuccess, errorMessage);
+        alertStatusUpdater.updateAlertStatus(alertId, sendSuccess, errorMessage);
     }
 
-    /**
-     * 알림 발송 결과 업데이트 (별도 트랜잭션)
-     */
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
-    protected void updateAlertStatus(Long alertId, boolean sendSuccess, String errorMessage) {
-        Alert alert = alertRepository.findById(alertId)
-                .orElseThrow(() -> new IllegalArgumentException("알림을 찾을 수 없습니다. ID: " + alertId));
+    public List<Alert> getAllAlerts() {
+        return alertRepository.findAllByOrderByDetectedAtDesc();
+    }
 
-        if (sendSuccess) {
-            // 전송 성공
-            alert.setSent(true);
-            alert.setSentAt(LocalDateTime.now());
-            alert.setLastErrorMessage(null);
-            alertRepository.save(alert);
-            log.info("알림 발송 완료 - ID: {}", alert.getId());
+    public List<Alert> getUnsentAlerts() {
+        return alertRepository.findBySentOrderByPriorityDescDetectedAtDesc(false);
+    }
 
-        } else {
-            // 전송 실패
-            alert.incrementRetryCount();
-            alert.setLastErrorMessage(errorMessage);
-            alertRepository.save(alert);
+    public List<Alert> getSentAlerts() {
+        return alertRepository.findBySentOrderByDetectedAtDesc(true);
+    }
 
-            log.warn("재시도 카운트 증가 - ID: {}, retryCount: {}/{}",
-                    alertId, alert.getRetryCount(), Alert.MAX_RETRIES);
+    public List<Alert> getAlertsBySite(Long siteId) {
+        return alertRepository.findBySiteIdOrderByDetectedAtDesc(siteId);
+    }
 
-            if (!alert.canRetry()) {
-                log.error("최대 재시도 횟수 도달 - 수동 확인 필요: ID = {}", alertId);
-            }
-        }
+    public List<Alert> getAlertsByKeyword(Long keywordId) {
+        return alertRepository.findByKeywordIdOrderByDetectedAtDesc(keywordId);
     }
 
     /**
@@ -188,11 +186,12 @@ public class AlertService {
     }
 
     /**
-     * ID로 알림 조회
+     * ID로 알림 조회 (없으면 AlertNotFoundException)
      */
-    public Optional<Alert> getAlertById(Long id) {
+    public Alert getAlertById(Long id) {
         log.debug("알림 조회 - ID: {}", id);
-        return alertRepository.findById(id);
+        return alertRepository.findById(id)
+                .orElseThrow(() -> new AlertNotFoundException(id));
     }
 
     /**
@@ -209,10 +208,11 @@ public class AlertService {
     @Transactional
     public Alert markAsSent(Long id) {
         Alert alert = alertRepository.findById(id)
-                .orElseThrow(() -> new IllegalArgumentException("알림을 찾을 수 없습니다. ID: " + id));
+                .orElseThrow(() -> new AlertNotFoundException(id));
 
         alert.setSent(true);
         alert.setSentAt(LocalDateTime.now());
+        alert.setLastErrorMessage(null);
         Alert saved = alertRepository.save(alert);
 
         log.info("알림 발송 완료 표시 - ID: {}", id);
@@ -220,14 +220,24 @@ public class AlertService {
     }
 
     /**
+     * 알림 일괄 발송 완료 표시
+     */
+    @Transactional
+    public int markAsSentBulk(List<Long> ids) {
+        if (ids == null || ids.isEmpty()) return 0;
+        int updated = alertRepository.markAsSentByIds(ids, LocalDateTime.now());
+        log.info("알림 일괄 발송 완료 표시 - {} 건", updated);
+        return updated;
+    }
+
+    /**
      * 알림 삭제
      */
     @Transactional
     public void deleteAlert(Long id) {
-        if (!alertRepository.existsById(id)) {
-            throw new IllegalArgumentException("알림을 찾을 수 없습니다. ID: " + id);
-        }
-        alertRepository.deleteById(id);
+        Alert alert = alertRepository.findById(id)
+                .orElseThrow(() -> new AlertNotFoundException(id));
+        alertRepository.delete(alert);
         log.info("알림 삭제 완료 - ID: {}", id);
     }
 
@@ -268,5 +278,75 @@ public class AlertService {
             log.info("전체 알림 삭제 완료 - {} 건", count);
         }
         return (int) count;
+    }
+
+    @Transactional
+    public void cleanupAllExcessAlerts(int maxAlertsPerSite) {
+        List<Site> sites = alertRepository.findSitesWithAlertCountExceeding(maxAlertsPerSite);
+        for (Site site : sites) {
+            cleanupExcessAlerts(site, maxAlertsPerSite);
+        }
+        if (!sites.isEmpty()) {
+            log.info("초과 알림 정리 완료: {} 개 사이트 처리", sites.size());
+        }
+    }
+
+    // ==================== SiteService 캐스케이드 삭제용 ====================
+
+    @Transactional
+    public void deleteAlertsBySiteId(Long siteId) {
+        alertRepository.deleteBySiteId(siteId);
+        log.debug("사이트 ID {}의 모든 알림 삭제 완료", siteId);
+    }
+
+    // ==================== MonitorService 알림 정리용 ====================
+
+    @Transactional
+    public void cleanupExcessAlerts(Site site, int maxAlerts) {
+        long alertCount = alertRepository.countBySite(site);
+        if (alertCount > maxAlerts) {
+            int deleteCount = (int) (alertCount - maxAlerts);
+            Pageable pageable = PageRequest.of(0, deleteCount);
+            Page<Alert> oldAlerts = alertRepository.findBySiteOrderByDetectedAtAsc(site, pageable);
+            if (!oldAlerts.isEmpty()) {
+                alertRepository.deleteAll(oldAlerts.getContent());
+                log.info("사이트 '{}' 알림 정리 완료: {} 개 삭제 (현재: {} -> {})",
+                        site.getName(), oldAlerts.getContent().size(), alertCount, maxAlerts);
+            }
+        }
+    }
+
+    // ==================== Controller 전용 DTO 반환 메서드 ====================
+
+    public List<AlertResponse> getAllAlertResponses() {
+        return getAllAlerts().stream().map(AlertResponse::from).toList();
+    }
+
+    public AlertResponse getAlertResponseById(Long id) {
+        return AlertResponse.from(getAlertById(id));
+    }
+
+    public List<AlertResponse> getUnsentAlertResponses() {
+        return getUnsentAlerts().stream().map(AlertResponse::from).toList();
+    }
+
+    public List<AlertResponse> getSentAlertResponses() {
+        return getSentAlerts().stream().map(AlertResponse::from).toList();
+    }
+
+    public List<AlertResponse> getAlertResponsesBySite(Long siteId) {
+        return getAlertsBySite(siteId).stream().map(AlertResponse::from).toList();
+    }
+
+    public List<AlertResponse> getAlertResponsesByKeyword(Long keywordId) {
+        return getAlertsByKeyword(keywordId).stream().map(AlertResponse::from).toList();
+    }
+
+    public List<AlertResponse> getAlertResponsesByPeriod(LocalDateTime startDate, LocalDateTime endDate) {
+        return getAlertsByPeriod(startDate, endDate).stream().map(AlertResponse::from).toList();
+    }
+
+    public AlertResponse markAsSentResponse(Long id) {
+        return AlertResponse.from(markAsSent(id));
     }
 }

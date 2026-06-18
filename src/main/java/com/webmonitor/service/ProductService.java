@@ -1,6 +1,7 @@
 package com.webmonitor.service;
 
 import com.webmonitor.domain.Product;
+import com.webmonitor.repository.AlertRepository;
 import com.webmonitor.repository.ProductRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -22,6 +23,7 @@ import java.util.Optional;
 public class ProductService {
 
     private final ProductRepository productRepository;
+    private final AlertRepository alertRepository;
 
     /**
      * 새로운 제품 등록
@@ -51,6 +53,9 @@ public class ProductService {
         product.setUrl(updatedProduct.getUrl());
         product.setActive(updatedProduct.getActive());
         product.setNotifyOnRestock(updatedProduct.getNotifyOnRestock());
+        if (updatedProduct.getNotifyOnContentChange() != null) {
+            product.setNotifyOnContentChange(updatedProduct.getNotifyOnContentChange());
+        }
         product.setPriority(updatedProduct.getPriority());
         product.setCheckIntervalMinutes(updatedProduct.getCheckIntervalMinutes());
 
@@ -70,6 +75,7 @@ public class ProductService {
         Product product = productRepository.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("제품을 찾을 수 없습니다. ID: " + id));
 
+        alertRepository.clearProductReference(id);
         productRepository.delete(product);
         log.info("제품 삭제 완료: ID = {}", id);
     }
